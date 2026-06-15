@@ -1,0 +1,42 @@
+{
+  "version": "phase1b-1c",
+  "description": "Synthetic plaintext attack and contrast cases for auth_reference",
+  "cases": [
+    {
+      "id": "compliant",
+      "category": "compliant",
+      "summary": "Mixed visibility; authorized top-k ranks visible masked distances",
+      "expected": "authorized top-k selects visible candidates by tilde_d"
+    },
+    {
+      "id": "skipped_candidate",
+      "category": "skipped_candidate",
+      "summary": "Adversarial subset omits a slot from Cand",
+      "expected": "check_candidate_coverage raises ValueError"
+    },
+    {
+      "id": "forged_label",
+      "category": "forged_label",
+      "summary": "Candidate label differs from committed auth state",
+      "expected": "verify_label_commitment raises ValueError"
+    },
+    {
+      "id": "checkpoint_mismatch",
+      "category": "checkpoint_mismatch",
+      "summary": "Label epoch inconsistent with checkpoint sigma",
+      "expected": "P returns 0; candidate invisible at evaluation"
+    },
+    {
+      "id": "post_filter_contrast",
+      "category": "post_filter_contrast",
+      "summary": "Raw top-k occupied by invisible objects; post-filter returns empty",
+      "expected": "authorized top-k [203,204] vs post-filter []"
+    },
+    {
+      "id": "visibility_manipulation",
+      "category": "visibility_manipulation",
+      "summary": "Adversary sets v_x=0 for a visible candidate",
+      "expected": "verify_visibility_consistency raises ValueError"
+    }
+  ]
+}
