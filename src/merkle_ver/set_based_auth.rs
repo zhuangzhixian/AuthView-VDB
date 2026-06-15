@@ -1,6 +1,9 @@
 use crate::ivf_pq::gadgets::vec_sub_gadget;
 use crate::ivf_pq_verify::gadgets::const_gen_gadget;
 use crate::merkle_ver::auth_mask_gadget::{auth_mask_distance_gadget, AUTH_MASK_D_MAX};
+use crate::merkle_ver::auth_policy_gadget::{
+    auth_policy_visibility_gadget, ObjectLabelTargets, UserContextTargets,
+};
 use crate::merkle_ver::standalone_commitment::standalone_commitment_gadget;
 use crate::pq_flat::gadgets::codebooks_query_gadget;
 use crate::pq_flat_verify::gadgets::set_belong_gedget;
@@ -90,6 +93,157 @@ pub fn set_based_auth_ivf_pq_gadget_all_visible(
                 ]);
             }
             let curr_dis = builder.add_many(vpqss_dis[i][j].clone());
+            let hat_d = auth_mask_distance_gadget(
+                builder,
+                valids[i][j],
+                visibility,
+                curr_dis,
+                AUTH_MASK_D_MAX,
+            );
+            vpqss_item_dis.push(vec![itemss[i][j], hat_d]);
+        }
+    }
+
+    set_equal_gadget(
+        builder,
+        fs_hash[2],
+        fs_hash[3],
+        vpqss_item_dis,
+        ordered_vpqss_item_dis.clone(),
+    );
+    for i in 0..(n_probe * n - 1) {
+        let flag = comp_gadget(
+            builder,
+            ordered_vpqss_item_dis[i][1].clone(),
+            ordered_vpqss_item_dis[i + 1][1].clone(),
+        );
+        builder.connect(flag, const_list[0]);
+    }
+    set_belong_gedget(builder, fs_hash[4..].to_vec(), vpqss_set, lut_set, f_, t_);
+    for i in 0..top_k {
+        builder.register_public_input(ordered_vpqss_item_dis[i][0]);
+    }
+
+    if merkled {
+        standalone_commitment_gadget(
+            builder,
+            query.clone(),
+            root.clone(),
+            codebooks_root.clone(),
+            codebooks.clone(),
+            ivf_center.clone(),
+            ivf_roots.clone(),
+            cluster_idxes,
+            cluster_center.clone(),
+            valids.clone(),
+            itemss.clone(),
+            cluster_pairs.clone(),
+            vpqss.clone(),
+        );
+    }
+}
+
+/// Per-slot auth label targets aligned with `[n_probe][n]` slot buffers.
+pub struct SlotAuthLabelTargets {
+    pub object_tenant_ids: Vec<Vec<Target>>,
+    pub object_project_ids: Vec<Vec<Target>>,
+    pub object_levels: Vec<Vec<Target>>,
+    pub object_states: Vec<Vec<Target>>,
+    pub object_epochs: Vec<Vec<Target>>,
+}
+
+/// AuthView set-based IVF-PQ gadget with per-slot policy visibility.
+///
+/// $$v_x = P(\gamma_U, \lambda_x, \sigma)$$ via `auth_policy_visibility_gadget`,
+/// then $$\hat d_x$$ via `auth_mask_distance_gadget`.
+pub fn set_based_auth_ivf_pq_gadget_policy(
+    builder: &mut CircuitBuilder<F, D>,
+    fs_hash: Vec<Target>,
+    query: Vec<Target>,
+    top_k: usize,
+    root: Target,
+    codebooks_root: Target,
+    codebooks: Vec<Vec<Vec<Target>>>,
+    ivf_center: Vec<Vec<Target>>,
+    ivf_roots: Vec<Target>,
+    cluster_center: Vec<Vec<Target>>,
+    valids: Vec<Vec<Target>>,
+    itemss: Vec<Vec<Target>>,
+    cluster_pairs: Vec<Vec<Vec<Target>>>,
+    vpqss: Vec<Vec<Vec<Target>>>,
+    vpqss_dis: Vec<Vec<Vec<Target>>>,
+    ordered_vpqss_item_dis: Vec<Vec<Target>>,
+    cluster_idx_dis: Vec<Vec<Target>>,
+    user: &UserContextTargets,
+    checkpoint_epoch: Target,
+    slot_labels: &SlotAuthLabelTargets,
+    f_: Vec<Target>,
+    t_: Vec<Target>,
+    merkled: bool,
+) {
+    let M = codebooks.len();
+    let K = codebooks[0].len();
+    let n = valids[0].len();
+    let n_probe = cluster_center.len();
+    let cluster_idxes: Vec<Target> = (0..n_probe)
+        .map(|i| cluster_idx_dis[i][0].clone())
+        .collect();
+    let const_list = const_gen_gadget(
+        builder,
+        max(max(n_probe as u64, n as u64), max(M as u64, K as u64)),
+    );
+
+    static_nn_gadget(
+        builder,
+        fs_hash[0],
+        fs_hash[1],
+        ivf_center.clone(),
+        query.clone(),
+        cluster_idx_dis.clone(),
+    );
+
+    let mut luts: Vec<Vec<Vec<Target>>> = Vec::with_capacity(n_probe);
+    for i in 0..n_probe {
+        let sub_val = vec_sub_gadget(builder, query.clone(), cluster_center[i].clone());
+        luts.push(codebooks_query_gadget(builder, codebooks.clone(), sub_val));
+    }
+
+    let mut lut_set: Vec<Vec<Target>> = Vec::with_capacity(n_probe * M * K);
+    for i in 0..n_probe {
+        for j in 0..M {
+            for k in 0..K {
+                lut_set.push(vec![
+                    const_list[i],
+                    const_list[j],
+                    const_list[k],
+                    luts[i][j][k],
+                ]);
+            }
+        }
+    }
+
+    let mut vpqss_item_dis: Vec<Vec<Target>> = Vec::with_capacity(n_probe * n);
+    let mut vpqss_set: Vec<Vec<Target>> = Vec::with_capacity(n_probe * n * M);
+    for i in 0..n_probe {
+        for j in 0..n {
+            for k in 0..M {
+                vpqss_set.push(vec![
+                    const_list[i],
+                    const_list[k],
+                    vpqss[i][j][k],
+                    vpqss_dis[i][j][k],
+                ]);
+            }
+            let curr_dis = builder.add_many(vpqss_dis[i][j].clone());
+            let label = ObjectLabelTargets {
+                object_tenant_id: slot_labels.object_tenant_ids[i][j],
+                object_project_id: slot_labels.object_project_ids[i][j],
+                object_level: slot_labels.object_levels[i][j],
+                object_state: slot_labels.object_states[i][j],
+                object_epoch: slot_labels.object_epochs[i][j],
+            };
+            let visibility =
+                auth_policy_visibility_gadget(builder, user, &label, checkpoint_epoch);
             let hat_d = auth_mask_distance_gadget(
                 builder,
                 valids[i][j],

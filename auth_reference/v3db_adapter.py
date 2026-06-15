@@ -26,11 +26,19 @@ from auth_reference.records import AuthLabel, CandidateRecord, Checkpoint, UserC
 from auth_reference.reference import (
     DEFAULT_D_MAX,
     AuthorizedReferenceResult,
+    compute_masked_distance,
     run_authorized_reference,
     score_candidate,
 )
 
 V3DB_MAX_DIS = DEFAULT_D_MAX
+
+# Integer tag registries for ZK policy gadget (Phase 2B-3b sidecar witness).
+ZK_MAX_PROJECTS = 4
+ZK_TENANT_ID: dict[str, int] = {"acme": 1, "other-tenant": 2}
+ZK_PROJECT_ID: dict[str, int] = {"proj-a": 10, "proj-b": 11}
+ZK_STATE_ID: dict[str, int] = {"active": 1, "inactive": 0}
+ZK_ACTIVE_STATE = 1
 
 
 @dataclass
@@ -313,3 +321,110 @@ def build_candidates_from_v3db_query(
     slot_rows = compute_v3db_slot_distances(query, center, code_books, buffers)
     candidates = candidate_records_from_slot_buffers(slot_rows, labels)
     return candidates, slot_rows, buffers
+
+
+def encode_user_context_for_zk(
+    user: UserContext,
+    checkpoint: Checkpoint,
+) -> dict[str, int | list[int]]:
+    """Map plaintext user context to integer ZK policy witness fields."""
+    projects = sorted(user.projects)
+    project_ids = [ZK_PROJECT_ID[p] for p in projects[:ZK_MAX_PROJECTS]]
+    project_valids = [1] * len(project_ids)
+    while len(project_ids) < ZK_MAX_PROJECTS:
+        project_ids.append(0)
+        project_valids.append(0)
+    return {
+        "user_tenant_id": ZK_TENANT_ID[user.tenant],
+        "user_project_ids": project_ids,
+        "user_project_valids": project_valids,
+        "user_clearance": int(user.clearance),
+        "user_epoch": int(user.epoch),
+        "checkpoint_epoch": int(checkpoint.epoch),
+    }
+
+
+def _encode_auth_label_for_zk(label: AuthLabel) -> tuple[int, int, int, int, int]:
+    state = ZK_STATE_ID.get(label.state, 0)
+    return (
+        ZK_TENANT_ID[label.tenant],
+        ZK_PROJECT_ID[label.project],
+        int(label.level),
+        state,
+        int(label.epoch),
+    )
+
+
+def encode_slot_auth_labels_for_zk(
+    buffers: V3DBSlotBuffers,
+    labels: dict[int, AuthLabel],
+    *,
+    default_label: AuthLabel | None = None,
+) -> dict[str, list[list[int]]]:
+    """
+    Per-slot integer auth label arrays shaped [n_probe][capacity].
+
+    Sidecar witness for policy gadget; not Merkle-bound in Phase 2B-3b.
+    """
+    default = default_label or AuthLabel(
+        tenant="acme",
+        project="proj-a",
+        level=1,
+        state="active",
+        epoch=1,
+    )
+    n_probe, capacity = buffers.valids.shape
+    tenants: list[list[int]] = []
+    projects: list[list[int]] = []
+    levels: list[list[int]] = []
+    states: list[list[int]] = []
+    epochs: list[list[int]] = []
+
+    for i in range(n_probe):
+        row_t, row_p, row_l, row_s, row_e = [], [], [], [], []
+        for j in range(capacity):
+            cid = int(buffers.itemss[i, j])
+            label = labels.get(cid, default)
+            t, p, lv, st, ep = _encode_auth_label_for_zk(label)
+            row_t.append(t)
+            row_p.append(p)
+            row_l.append(lv)
+            row_s.append(st)
+            row_e.append(ep)
+        tenants.append(row_t)
+        projects.append(row_p)
+        levels.append(row_l)
+        states.append(row_s)
+        epochs.append(row_e)
+
+    return {
+        "object_tenant_ids": tenants,
+        "object_project_ids": projects,
+        "object_levels": levels,
+        "object_states": states,
+        "object_epochs": epochs,
+    }
+
+
+def build_ordered_auth_item_dis(
+    candidates: list[CandidateRecord],
+    user: UserContext,
+    checkpoint: Checkpoint,
+) -> list[list[int]]:
+    """
+    Build sorted (cid, hat_d) witness using plaintext oracle masking.
+
+    Sort key matches circuit non-decreasing distance constraint (V3DB tie-break).
+    """
+    pairs: list[list[int]] = []
+    for c in candidates:
+        visibility = compute_visibility(user, c.label, checkpoint)
+        _, masked = compute_masked_distance(c.distance, c.valid, visibility)
+        pairs.append([c.cid, int(masked)])
+    pairs.sort(key=lambda row: row[1])
+    return pairs
+
+
+def top_k_cids_from_ordered(ordered: list[list[int]], top_k: int) -> list[int]:
+    """First k cids from sorted auth-masked (cid, distance) witness."""
+    return [int(row[0]) for row in ordered[:top_k]]
