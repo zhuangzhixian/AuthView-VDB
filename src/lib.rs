@@ -27,6 +27,7 @@ use crate::merkle_commit::proof::{merkle_commit_plain_proof, merkle_commit_proof
 use crate::merkle_ver::circuit_based_proof::circuit_based_ivf_pq_proof;
 use crate::merkle_ver::set_based_proof::{set_based_gate, set_based_ivf_pq_proof};
 use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_all_visible;
+use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_committed;
 use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_policy;
 use crate::merkle_ver::standalone_commitment::standalone_commitment_proof;
 use crate::pq_flat::proof::pq_flat_proof;
@@ -227,6 +228,76 @@ pub fn py_set_based_auth_with_merkle(
             true,
         )
         .map_err(|e| PyRuntimeError::new_err(format!("set_based_auth_ivf_pq_proof_policy failed: {e}")))?;
+
+    Ok((
+        build_time,
+        prove_time,
+        verify_time,
+        proof_size,
+        memory_used,
+        num_gates,
+    ))
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+pub fn py_set_based_auth_committed_with_merkle(
+    query: Vec<i64>,
+    ivf_center: Vec<Vec<i64>>,
+    vpqss: Vec<Vec<Vec<i64>>>,
+    valids: Vec<Vec<i64>>,
+    itemss: Vec<Vec<i64>>,
+    codebooks: Vec<Vec<Vec<i64>>>,
+    ivf_roots: Vec<u64>,
+    top_k: i64,
+    cluster_idx_dis: Vec<Vec<i64>>,
+    root_auth: u64,
+    user_tenant_id: u64,
+    user_project_ids: Vec<u64>,
+    user_project_valids: Vec<u64>,
+    user_clearance: u64,
+    user_epoch: u64,
+    checkpoint_epoch: u64,
+    object_tenant_ids: Vec<Vec<u64>>,
+    object_project_ids: Vec<Vec<u64>>,
+    object_levels: Vec<Vec<u64>>,
+    object_states: Vec<Vec<u64>>,
+    object_epochs: Vec<Vec<u64>>,
+    auth_path_directions: Vec<Vec<Vec<u64>>>,
+    auth_path_siblings: Vec<Vec<Vec<u64>>>,
+) -> PyResult<(f64, f64, f64, u64, u64, u64)> {
+    let (build_time, prove_time, verify_time, proof_size, memory_used, num_gates) =
+        set_based_auth_ivf_pq_proof_committed(
+            query,
+            ivf_center,
+            vpqss,
+            valids,
+            itemss,
+            codebooks,
+            ivf_roots,
+            top_k,
+            cluster_idx_dis,
+            root_auth,
+            user_tenant_id,
+            user_project_ids,
+            user_project_valids,
+            user_clearance,
+            user_epoch,
+            checkpoint_epoch,
+            object_tenant_ids,
+            object_project_ids,
+            object_levels,
+            object_states,
+            object_epochs,
+            auth_path_directions,
+            auth_path_siblings,
+            true,
+        )
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "set_based_auth_ivf_pq_proof_committed failed: {e}"
+            ))
+        })?;
 
     Ok((
         build_time,
@@ -585,6 +656,7 @@ fn zk_IVF_PQ(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_set_based_with_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_auth_all_visible_with_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_auth_with_merkle, m)?)?;
+    m.add_function(wrap_pyfunction!(py_set_based_auth_committed_with_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_without_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_gate, m)?)?;
 

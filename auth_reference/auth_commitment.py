@@ -126,3 +126,44 @@ def verify_auth_opening_plaintext(
         else:
             curr = int(single_hash([sib, curr]))
     return curr == int(expected_root)
+
+
+def next_pow2(n: int) -> int:
+    """Smallest power of two >= n (matches Rust auth tree padding)."""
+    if n <= 0:
+        return 1
+    p = 1
+    while p < n:
+        p *= 2
+    return p
+
+
+def dummy_auth_label_for_slot(cid: int) -> AuthLabelLeaf:
+    """Deterministic auth label for invalid padding slots: (cid, 0, 0, 0, 0, 0)."""
+    return AuthLabelLeaf(int(cid), 0, 0, 0, 0, 0)
+
+
+def build_auth_tree_for_slot_labels(
+    slot_labels: list[AuthLabelLeaf],
+) -> tuple[int, list[int], int]:
+    """
+    Build global auth Merkle tree over row-major slot labels.
+
+    Pads with H(0,0,0,0,0,0) leaves to the next power of two. Returns
+    `(root_auth, hash_tree, padded_leaf_count)`.
+    """
+    if not slot_labels:
+        raise ValueError("empty slot label list")
+    padded = next_pow2(len(slot_labels))
+    leaf_hashes = [compute_auth_leaf_record(lbl) for lbl in slot_labels]
+    while len(leaf_hashes) < padded:
+        leaf_hashes.append(compute_auth_leaf(0, 0, 0, 0, 0, 0))
+    root, tree = build_auth_merkle_tree(leaf_hashes)
+    return int(root), tree, padded
+
+
+def split_auth_path(path: list[list[int]]) -> tuple[list[int], list[int]]:
+    """Split `open_auth_label` rows into parallel direction / sibling arrays."""
+    directions = [int(row[0]) for row in path]
+    siblings = [int(row[1]) for row in path]
+    return directions, siblings

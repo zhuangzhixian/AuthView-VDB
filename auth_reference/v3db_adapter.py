@@ -21,6 +21,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from auth_reference.auth_commitment import (
+    AuthLabelLeaf,
+    build_auth_tree_for_slot_labels,
+    dummy_auth_label_for_slot,
+    open_auth_label,
+    split_auth_path,
+)
 from auth_reference.policy import compute_visibility
 from auth_reference.records import AuthLabel, CandidateRecord, Checkpoint, UserContext
 from auth_reference.reference import (
@@ -428,3 +435,95 @@ def build_ordered_auth_item_dis(
 def top_k_cids_from_ordered(ordered: list[list[int]], top_k: int) -> list[int]:
     """First k cids from sorted auth-masked (cid, distance) witness."""
     return [int(row[0]) for row in ordered[:top_k]]
+
+
+def _slot_label_leaf_for_zk(
+    cid: int,
+    valid: bool,
+    labels: dict[int, AuthLabel],
+    default_label: AuthLabel,
+) -> AuthLabelLeaf:
+    """Auth label leaf for one slot; invalid slots use deterministic dummy fields."""
+    if not valid:
+        return dummy_auth_label_for_slot(cid)
+    label = labels.get(cid, default_label)
+    t, p, lv, st, ep = _encode_auth_label_for_zk(label)
+    return AuthLabelLeaf(int(cid), t, p, lv, st, ep)
+
+
+def build_committed_auth_witness(
+    buffers: V3DBSlotBuffers,
+    labels: dict[int, AuthLabel],
+    *,
+    default_label: AuthLabel | None = None,
+) -> dict[str, int | list[list[int]] | list[list[list[int]]]]:
+    """
+    Build committed-auth ZK witness: root_auth + per-slot Merkle openings + label arrays.
+
+    Leaf field order matches Rust `auth_label_leaf_fields`. Invalid padding slots
+    use `(cid, 0, 0, 0, 0, 0)` with a valid opening under the same global tree.
+    """
+    default = default_label or AuthLabel(
+        tenant="acme",
+        project="proj-a",
+        level=1,
+        state="active",
+        epoch=1,
+    )
+    n_probe, capacity = buffers.valids.shape
+
+    flat_labels: list[AuthLabelLeaf] = []
+    for i in range(n_probe):
+        for j in range(capacity):
+            cid = int(buffers.itemss[i, j])
+            valid = bool(buffers.valids[i, j])
+            flat_labels.append(
+                _slot_label_leaf_for_zk(cid, valid, labels, default)
+            )
+
+    root_auth, hash_tree, _padded = build_auth_tree_for_slot_labels(flat_labels)
+    depth = len(open_auth_label(0, hash_tree))
+
+    tenants: list[list[int]] = []
+    projects: list[list[int]] = []
+    levels: list[list[int]] = []
+    states: list[list[int]] = []
+    epochs: list[list[int]] = []
+    directions: list[list[list[int]]] = []
+    siblings: list[list[list[int]]] = []
+
+    leaf_idx = 0
+    for i in range(n_probe):
+        row_t, row_p, row_l, row_s, row_e = [], [], [], [], []
+        row_d, row_sib = [], []
+        for j in range(capacity):
+            lbl = flat_labels[leaf_idx]
+            row_t.append(lbl.tenant)
+            row_p.append(lbl.project)
+            row_l.append(lbl.level)
+            row_s.append(lbl.state)
+            row_e.append(lbl.epoch)
+            path = open_auth_label(leaf_idx, hash_tree)
+            d_row, s_row = split_auth_path(path)
+            assert len(d_row) == depth
+            row_d.append(d_row)
+            row_sib.append(s_row)
+            leaf_idx += 1
+        tenants.append(row_t)
+        projects.append(row_p)
+        levels.append(row_l)
+        states.append(row_s)
+        epochs.append(row_e)
+        directions.append(row_d)
+        siblings.append(row_sib)
+
+    return {
+        "root_auth": int(root_auth),
+        "auth_path_directions": directions,
+        "auth_path_siblings": siblings,
+        "object_tenant_ids": tenants,
+        "object_project_ids": projects,
+        "object_levels": levels,
+        "object_states": states,
+        "object_epochs": epochs,
+    }
