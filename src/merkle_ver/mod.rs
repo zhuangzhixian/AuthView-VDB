@@ -1,3 +1,4 @@
+pub mod auth_mask_gadget; // authorization visibility mask (Phase 2B-1)
 pub mod circuit_based; // circuit-only版本电路实现
 pub mod circuit_based_proof; // circuit-only版本证明系统
 pub mod ivf_pq_merkle; // 一些merkle库
