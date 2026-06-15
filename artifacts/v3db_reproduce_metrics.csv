@@ -1,0 +1,13 @@
+command,status,elapsed_seconds,notes
+rustc --version,pass,0,1.98.0-nightly (3daae5e42 2026-06-14)
+cargo build --release,pass,62,138 warnings; no errors
+maturin develop --release,pass,11,wheel installed to .venv
+python3 -c import zk_IVF_PQ,pass,0,Module loads from venv
+python tests/rust_part.py,pass,0.06,single_hash smoke test
+py_set_based_gate (synthetic),pass,39.65,gate_count=1192997; M=8 K=256 d=128 n_list=64 n_probe=8 n=10000 top_k=10 merkled=true
+bench_free_bench/ivf_pq_verify.py --N 256 --n_list 32 --n_probe 4,partial,5.51,circuit built; verification returned False (witness mismatch)
+ivf_pq/merkle_zk.py __main__ (synthetic),pass,12.95,"build=6.253s prove=2.301s verify=0.006s proof_size=195220 mem=5383872512 gates=89496; N=10000 D=128 n_list=32"
+ivf_pq/zk.py __main__ (synthetic),fail,0.97,TypeError codebooks float32 vs Rust int64
+python tests/pipeline.py,skip,,"blocked: data/siftsmall/ missing; also needs PYTHONPATH=."
+python tests/zk.py,skip,,"blocked: data/siftsmall/ missing"
+python tests/merkle_zk.py,skip,,"blocked: data/siftsmall/ missing"
