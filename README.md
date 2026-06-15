@@ -1,10 +1,34 @@
-# zk-IVF-PQ
+# AuthView-VDB
 
-## Technical Note
+Independent research prototype for **proof-carrying vector search over
+committed authorization views**.
 
-Implementation details are provided in our [technical note](Technical_Details_of_V3DB.pdf).
+## Status
 
-## Build
+This repository begins from the **V3DB baseline** (tag: `v3db-import-baseline`).
+The current code implements V3DB-style verifiable IVF-PQ search over committed
+snapshots. **Authorization-view proof features are planned extensions** and are
+**not implemented** in this baseline.
+
+## Research goal
+
+Extend V3DB-style verifiable IVF-PQ search so that a service can prove its
+returned top-k equals the result of a declared ANN retrieval program executed
+over the **current user's committed authorization view**—not merely that each
+returned object is individually authorized.
+
+See [docs/research_scope.md](docs/research_scope.md) for the research problem
+and [docs/phase0_plan.md](docs/phase0_plan.md) for the next engineering phase.
+
+## Inherited from V3DB
+
+The baseline code, build flow, and experiments below come from V3DB. For
+attribution and citation, see [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
+
+Implementation details are provided in the V3DB
+[technical note](Technical_Details_of_V3DB.pdf).
+
+### Build
 
 Build and install the Python extension:
 
@@ -12,9 +36,11 @@ Build and install the Python extension:
 maturin develop --release
 ```
 
-## Experiment 1: Retrieval Utility Evaluation
+Rust-only build: `cargo build --release`
 
-### Classic ANN (SIFT1M / GIST1M)
+### Experiment 1: Retrieval Utility Evaluation
+
+#### Classic ANN (SIFT1M / GIST1M)
 
 ```bash
 bash scripts/acc_bench.sh
@@ -22,9 +48,7 @@ bash scripts/acc_bench.sh
 
 Results are cached under `data/acc_bench/`.
 
-### IR (MS MARCO passage retrieval, dev)
-
-Run the two evaluation jobs (high-acc and zk-opt) and then aggregate metrics:
+#### IR (MS MARCO passage retrieval, dev)
 
 ```bash
 python -m bench.ms_macro_eval \
@@ -50,32 +74,25 @@ python -m bench.ms_macro_eval \
 python -m bench.ms_macro_result data/exp1/ms_macro_high_acc data/exp1/ms_macro_zk_fast
 ```
 
-Outputs are written under `data/exp1/`.
-
-## Experiment 2: Proof Cost Evaluation
-
-Script: `scripts/bench_suite.sh` (runs `python -m bench.bench_suite` and caches results under `data/bench_result/`).
+### Experiment 2: Proof Cost Evaluation
 
 ```bash
 bash scripts/bench_suite.sh
 ```
 
-Optional: if `matplotlib` is available, a summary plot is generated at `data/bench_result/bench_summary.pdf`.
-
-## Experiment 3: Configuration Trade-offs
-
-### Fixed scan budget: sweep `n_list`
+### Experiment 3: Configuration Trade-offs
 
 ```bash
 bash scripts/optimal_config.sh
-```
-
-Outputs are written to `data/optimal_config/`.
-
-### Fixed code budget: gate-only sweep over `K` (and zk-opt selection)
-
-```bash
 bash scripts/optimal_mem_gate_only_ann_ir.sh
 ```
 
-Outputs are written to `data/optimal_mem_gate_only/`.
+## Repository layout
+
+| Path | Role |
+|------|------|
+| `src/` | Rust ZK circuits and proof logic (Plonky2) |
+| `ivf_pq/` | Python IVF-PQ index building and pipelines |
+| `tests/`, `bench/`, `bench_free_bench/` | Tests and benchmarks |
+| `scripts/` | Experiment shell scripts |
+| `docs/` | AuthView-VDB research and phase plans |
