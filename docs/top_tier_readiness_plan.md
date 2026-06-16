@@ -48,7 +48,7 @@ AuthView-VDB sits at **systems + security** boundary. Database venues will ask: 
 
 1. **Authorization-view retrieval semantics** in ZK (policy + mask + coverage)—*supporting, largely done*.
 2. **ACL-class compression** with candidate↔class binding proof—*missing, high value*.
-3. **Visibility-gated scoring** with partition correctness—*missing, high value*.
+3. **Visibility-gated scoring / proof planning** with region purity—*design frozen (6A/6A-2); implementation pending*.
 4. Slot-aligned Merkle layout—*done, too weak alone*.
 
 ### Current state
@@ -56,8 +56,8 @@ AuthView-VDB sits at **systems + security** boundary. Database venues will ask: 
 | Contribution type | Status |
 |-------------------|--------|
 | New retrieval objective + ZK realization | Partial (kernel) |
-| Cost optimization with proof obligation | Not started (ACL, gating) |
-| Asymptotic / structural argument (\(N_{acl}\), \(N_{vis}\)) | Not demonstrated |
+| Cost optimization with proof obligation | ACL-class done; proof planning designed (6A-2) |
+| Asymptotic / structural argument (\(N_{acl}\), \(N_{vis}\), purity ratios) | N_acl/N_sel measured; N_vis/purity planned |
 
 **Verdict:** **Fails** top-tier algorithm bar today. Phase 5–6 are **required**, not optional polish.
 
@@ -96,7 +96,7 @@ AuthView-VDB sits at **systems + security** boundary. Database venues will ask: 
 | **RQ1 Security** | Attack matrix, ZK-level failures | Partial (unit tests only) |
 | **RQ2 Overhead** | vs content-only baseline | ✅ summary CSV |
 | **RQ3 Scaling** | vs \(N_{sel}\), n_probe, slot | ✅ 6 workloads |
-| **RQ4 Structure-aware cost** | N_vis/N_sel, N_acl/N_sel curves | ❌ |
+| **RQ4 Structure-aware cost** | N_vis/N_sel, N_acl/N_sel, pure/impure ratio curves | Partial (N_acl/N_sel ✅) |
 | **RQ5 Semantic gap** | Post-filter vs authorized (quantified) | ❌ (toy only) |
 
 Also expected:
@@ -116,8 +116,8 @@ Dimension              Current          Top-tier need
 ─────────────────────────────────────────────────────
 Problem framing        Reset (4B)       Paper §1–2 written
 Proof kernel           Strong           —
-ACL-class compression  None             Core algorithm + N_acl/N_sel
-Visibility-gated       None             Core opt + N_vis/N_sel
+ACL-class compression  Done (Phase 5)   N_acl/N_sel ✅
+Visibility / planning  Designed (6A-2) N_vis/N_sel + purity ratios
 Attack experiments     Partial          Full matrix + table
 Paper draft            Outline          8–10 page eval + security
 Real / larger data     None             At least one public benchmark overlay
@@ -131,14 +131,15 @@ Real / larger data     None             At least one public benchmark overlay
 |----------|-----------|--------------------------|
 | **P0** | Positioning + paper §1–2 (no V3DB extension framing) | Required for any submission |
 | **P0** | Attack matrix completion (plaintext + ZK + table) | Security RQ |
-| **P1** | ACL-class compression (Phase 5) + N_acl/N_sel | Algorithm + eval |
-| **P1** | Visibility-gated scoring (Phase 6) + N_vis/N_sel | Algorithm + eval |
+| **P1** | ACL-class compression (Phase 5) + N_acl/N_sel | Algorithm + eval ✅ |
+| **P1** | Proof planning reference (Phase 6B-1) + N_vis/N_sel + purity ratios | Algorithm + eval |
+| **P2** | Region purity ZK gadget (Phase 6B-3, conditional) | Top-tier enhancement |
 | **P2** | Paper tables from existing CSV (overhead/scaling) | Supports RQ2–3 |
 | **P2** | Update formal/security doc status | Consistency |
 | **P3** | SIFT / larger synthetic overlay | Strengthen eval |
 | **P4** | Slot-aligned appendix | Optional |
 
-**Do not prioritize** slot-aligned layout, pure/impure blocks, or private credentials before P0–P1.
+**Do not prioritize** private credentials before P0–P1. Slot-aligned layout remains appendix-only. Full Veda-style index replication is **out of scope**; only proof-planning semantics are in scope.
 
 ---
 
@@ -148,14 +149,15 @@ Before targeting VLDB/SIGMOD/ICDE main conference:
 
 - [ ] Paper title/abstract contain no “V3DB extension”
 - [ ] Attack table with ≥8 scenarios and ZK outcomes
-- [ ] ACL-class path implemented + N_acl/N_sel figure
-- [ ] Visibility-gated path implemented + N_vis/N_sel figure
+- [ ] ACL-class path implemented + N_acl/N_sel figure ✅
+- [ ] Proof planning plaintext reference + N_vis/N_sel + pure/impure ratio figures
+- [ ] Optional: region purity ZK gadget (Phase 6B-3)
 - [ ] Post-filter vs authorized quantitative comparison (≥1 non-toy workload)
-- [ ] Related work: V3DB, verifiable DB, filtered ANN, ZK access control
+- [ ] Related work: V3DB, verifiable DB, filtered ANN, ZK access control, **Veda/EffVeda (motivation only)**
 - [ ] Full draft with limitations section
 - [ ] Artifact instructions (build, bench, reproduce tables)
 
-**Current count: ~3/8** (kernel, overhead CSV, positioning docs).
+**Current count: ~4/8** (kernel, overhead CSV, positioning docs, N_acl/N_sel curve).
 
 ---
 
@@ -170,9 +172,33 @@ Before targeting VLDB/SIGMOD/ICDE main conference:
 
 ---
 
-## 10. Key message for authors
+## 11. Access-Aware Proof Planning (Phase 6A-2)
+
+**Status:** design frozen (docs only); extends visibility-gated scoring.
+
+Access-aware indexing (Veda, EffVeda) motivates **structure-aware proof cost**, but AuthView-VDB is **not** a Veda extension:
+
+| | Veda / EffVeda | AuthView-VDB |
+|---|----------------|--------------|
+| Trust | Server trusted | Malicious server; ZK proof |
+| Pure/impure | Index execution (what to scan) | **Proof planning** (what to prove) |
+| Goal | QPS, recall, SA/QA | Authorized top-k correctness |
+
+**Phase 6 contribution ladder (updated):**
+
+1. **ACL-class compression** (Phase 5) — `N_acl/N_sel`; policy-once; **implemented**.
+2. **Visibility-gated scoring** (Phase 6A) — candidate-level semantic model; `N_vis/N_sel`.
+3. **Access-structure-aware proof planning** (Phase 6A-2) — pure-visible / pure-invisible / impure **regions**; purity ratios + **PA/SA** framework.
+
+See [phase6_access_aware_proof_planning.md](phase6_access_aware_proof_planning.md).
+
+**Top-tier enhancement:** add proof-planning figure (pure/impure ratio vs ideal PA) alongside N_acl/N_sel and N_vis/N_sel curves.
+
+---
+
+## 12. Key message for authors
 
 > **The proof kernel is the foundation, not the destination.**  
-> Top-tier reviewers will accept V3DB as related work and ask what **new** algorithm and **which curves** justify a database venue. ACL-class compression and visibility-gated scoring answer that question; slot-aligned Merkle saves ~3% and belongs in appendix.
+> Top-tier reviewers will accept V3DB as related work and ask what **new** algorithm and **which curves** justify a database venue. ACL-class compression and access-structure-aware proof planning answer that question; Veda/EffVeda motivate structure but are cited as related work only—not as a baseline or extension. Slot-aligned Merkle saves ~3% and belongs in appendix.
 
-See [next_phase_acl_visibility_plan.md](next_phase_acl_visibility_plan.md) for Phase 5–6 design.
+See [next_phase_acl_visibility_plan.md](next_phase_acl_visibility_plan.md), [phase6_access_aware_proof_planning.md](phase6_access_aware_proof_planning.md) for Phase 5–6 design.
