@@ -1,6 +1,7 @@
 pub mod auth_commitment_gadget; // auth label Merkle commitment (Phase 2C-1)
 pub mod auth_mask_gadget; // authorization visibility mask (Phase 2B-1)
 pub mod auth_policy_gadget; // authorization policy predicate (Phase 2B-2)
+pub mod slot_aligned_auth_commitment_gadget; // slot-aligned auth commitment (Phase 3B-2)
 pub mod circuit_based; // circuit-only版本电路实现
 pub mod circuit_based_proof; // circuit-only版本证明系统
 pub mod ivf_pq_merkle; // 一些merkle库
