@@ -29,6 +29,7 @@ use crate::merkle_ver::set_based_proof::{set_based_gate, set_based_ivf_pq_proof}
 use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_all_visible;
 use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_committed;
 use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_committed_slot_aligned;
+use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_committed_acl_class;
 use crate::merkle_ver::set_based_auth_proof::set_based_auth_ivf_pq_proof_policy;
 use crate::merkle_ver::standalone_commitment::standalone_commitment_proof;
 use crate::pq_flat::proof::pq_flat_proof;
@@ -375,6 +376,92 @@ pub fn py_set_based_auth_slot_aligned_with_merkle(
         .map_err(|e| {
             PyRuntimeError::new_err(format!(
                 "set_based_auth_ivf_pq_proof_committed_slot_aligned failed: {e}"
+            ))
+        })?;
+
+    Ok((
+        build_time,
+        prove_time,
+        verify_time,
+        proof_size,
+        memory_used,
+        num_gates,
+    ))
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+pub fn py_set_based_auth_acl_class_with_merkle(
+    query: Vec<i64>,
+    ivf_center: Vec<Vec<i64>>,
+    vpqss: Vec<Vec<Vec<i64>>>,
+    valids: Vec<Vec<i64>>,
+    itemss: Vec<Vec<i64>>,
+    codebooks: Vec<Vec<Vec<i64>>>,
+    ivf_roots: Vec<u64>,
+    top_k: i64,
+    cluster_idx_dis: Vec<Vec<i64>>,
+    root_acl_class: u64,
+    root_object_class_binding: u64,
+    user_tenant_id: u64,
+    user_project_ids: Vec<u64>,
+    user_project_valids: Vec<u64>,
+    user_clearance: u64,
+    user_epoch: u64,
+    checkpoint_epoch: u64,
+    selected_class_valids: Vec<u64>,
+    selected_acl_class_ids: Vec<u64>,
+    selected_class_tenant_ids: Vec<u64>,
+    selected_class_project_ids: Vec<u64>,
+    selected_class_required_clearances: Vec<u64>,
+    selected_class_states: Vec<u64>,
+    selected_class_epochs: Vec<u64>,
+    selected_class_path_directions: Vec<Vec<u64>>,
+    selected_class_path_siblings: Vec<Vec<u64>>,
+    binding_acl_class_ids: Vec<Vec<u64>>,
+    binding_epochs: Vec<Vec<u64>>,
+    binding_path_directions: Vec<Vec<Vec<u64>>>,
+    binding_path_siblings: Vec<Vec<Vec<u64>>>,
+    per_slot_class_selector: Vec<Vec<Vec<u64>>>,
+) -> PyResult<(f64, f64, f64, u64, u64, u64)> {
+    let (build_time, prove_time, verify_time, proof_size, memory_used, num_gates) =
+        set_based_auth_ivf_pq_proof_committed_acl_class(
+            query,
+            ivf_center,
+            vpqss,
+            valids,
+            itemss,
+            codebooks,
+            ivf_roots,
+            top_k,
+            cluster_idx_dis,
+            root_acl_class,
+            root_object_class_binding,
+            user_tenant_id,
+            user_project_ids,
+            user_project_valids,
+            user_clearance,
+            user_epoch,
+            checkpoint_epoch,
+            selected_class_valids,
+            selected_acl_class_ids,
+            selected_class_tenant_ids,
+            selected_class_project_ids,
+            selected_class_required_clearances,
+            selected_class_states,
+            selected_class_epochs,
+            selected_class_path_directions,
+            selected_class_path_siblings,
+            binding_acl_class_ids,
+            binding_epochs,
+            binding_path_directions,
+            binding_path_siblings,
+            per_slot_class_selector,
+            true,
+        )
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "set_based_auth_ivf_pq_proof_committed_acl_class failed: {e}"
             ))
         })?;
 
@@ -737,6 +824,7 @@ fn zk_IVF_PQ(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_set_based_auth_with_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_auth_committed_with_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_auth_slot_aligned_with_merkle, m)?)?;
+    m.add_function(wrap_pyfunction!(py_set_based_auth_acl_class_with_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_without_merkle, m)?)?;
     m.add_function(wrap_pyfunction!(py_set_based_gate, m)?)?;
 

@@ -1,5 +1,11 @@
 use crate::ivf_pq::gadgets::vec_sub_gadget;
 use crate::ivf_pq_verify::gadgets::const_gen_gadget;
+use crate::merkle_ver::acl_class_commitment_gadget::{
+    acl_class_policy_once_gadget, acl_class_table_match_gadget,
+    inherit_slot_visibility_from_class_gadget, verify_acl_class_opening_gadget,
+    verify_object_class_binding_opening_gadget, ACLClassLabelTargets,
+    ObjectClassBindingTargets,
+};
 use crate::merkle_ver::auth_commitment_gadget::{
     auth_label_merkle_verify_gadget, AuthLabelCommitmentTargets,
 };
@@ -635,6 +641,241 @@ pub fn set_based_auth_ivf_pq_gadget_committed_slot_aligned(
             root_auth,
             &slots,
         );
+    }
+
+    set_equal_gadget(
+        builder,
+        fs_hash[2],
+        fs_hash[3],
+        vpqss_item_dis,
+        ordered_vpqss_item_dis.clone(),
+    );
+    for i in 0..(n_probe * n - 1) {
+        let flag = comp_gadget(
+            builder,
+            ordered_vpqss_item_dis[i][1].clone(),
+            ordered_vpqss_item_dis[i + 1][1].clone(),
+        );
+        builder.connect(flag, const_list[0]);
+    }
+    set_belong_gedget(builder, fs_hash[4..].to_vec(), vpqss_set, lut_set, f_, t_);
+    for i in 0..top_k {
+        builder.register_public_input(ordered_vpqss_item_dis[i][0]);
+    }
+
+    if merkled {
+        standalone_commitment_gadget(
+            builder,
+            query.clone(),
+            root.clone(),
+            codebooks_root.clone(),
+            codebooks.clone(),
+            ivf_center.clone(),
+            ivf_roots.clone(),
+            cluster_idxes,
+            cluster_center.clone(),
+            valids.clone(),
+            itemss.clone(),
+            cluster_pairs.clone(),
+            vpqss.clone(),
+        );
+    }
+}
+
+/// Fixed-length selected ACL class table witness: `[n_acl_max]`.
+pub struct ACLClassTableWitnessTargets {
+    pub acl_class_ids: Vec<Target>,
+    pub tenant_ids: Vec<Target>,
+    pub project_ids: Vec<Target>,
+    pub required_clearances: Vec<Target>,
+    pub states: Vec<Target>,
+    pub epochs: Vec<Target>,
+    pub valids: Vec<Target>,
+    pub directions: Vec<Vec<Target>>,
+    pub siblings: Vec<Vec<Target>>,
+}
+
+/// Per-slot object-to-class binding Merkle witness: `[n_probe][n]`.
+pub struct SlotBindingWitnessTargets {
+    pub acl_class_ids: Vec<Vec<Target>>,
+    pub epochs: Vec<Vec<Target>>,
+    pub directions: Vec<Vec<Vec<Target>>>,
+    pub siblings: Vec<Vec<Vec<Target>>>,
+}
+
+/// Per-slot one-hot class selector: `[n_probe][n][n_acl_max]`.
+pub struct SlotClassSelectorTargets {
+    pub selectors: Vec<Vec<Vec<Target>>>,
+}
+
+/// AuthView set-based IVF-PQ gadget with ACL-class committed authorization.
+pub fn set_based_auth_ivf_pq_gadget_committed_acl_class(
+    builder: &mut CircuitBuilder<F, D>,
+    fs_hash: Vec<Target>,
+    query: Vec<Target>,
+    top_k: usize,
+    root: Target,
+    codebooks_root: Target,
+    codebooks: Vec<Vec<Vec<Target>>>,
+    ivf_center: Vec<Vec<Target>>,
+    ivf_roots: Vec<Target>,
+    cluster_center: Vec<Vec<Target>>,
+    valids: Vec<Vec<Target>>,
+    itemss: Vec<Vec<Target>>,
+    cluster_pairs: Vec<Vec<Vec<Target>>>,
+    vpqss: Vec<Vec<Vec<Target>>>,
+    vpqss_dis: Vec<Vec<Vec<Target>>>,
+    ordered_vpqss_item_dis: Vec<Vec<Target>>,
+    cluster_idx_dis: Vec<Vec<Target>>,
+    root_acl_class: Target,
+    root_object_class_binding: Target,
+    user: &UserContextTargets,
+    checkpoint_epoch: Target,
+    acl_table: &ACLClassTableWitnessTargets,
+    bindings: &SlotBindingWitnessTargets,
+    selectors: &SlotClassSelectorTargets,
+    class_depth: usize,
+    binding_depth: usize,
+    f_: Vec<Target>,
+    t_: Vec<Target>,
+    merkled: bool,
+) {
+    builder.register_public_input(root_acl_class);
+    builder.register_public_input(root_object_class_binding);
+
+    let n_acl_max = acl_table.acl_class_ids.len();
+    assert_eq!(n_acl_max, acl_table.valids.len());
+    assert_eq!(n_acl_max, acl_table.directions.len());
+
+    let M = codebooks.len();
+    let K = codebooks[0].len();
+    let n = valids[0].len();
+    let n_probe = cluster_center.len();
+    let cluster_idxes: Vec<Target> = (0..n_probe)
+        .map(|i| cluster_idx_dis[i][0].clone())
+        .collect();
+    let const_list = const_gen_gadget(
+        builder,
+        max(max(n_probe as u64, n as u64), max(M as u64, K as u64)),
+    );
+
+    static_nn_gadget(
+        builder,
+        fs_hash[0],
+        fs_hash[1],
+        ivf_center.clone(),
+        query.clone(),
+        cluster_idx_dis.clone(),
+    );
+
+    let mut luts: Vec<Vec<Vec<Target>>> = Vec::with_capacity(n_probe);
+    for i in 0..n_probe {
+        let sub_val = vec_sub_gadget(builder, query.clone(), cluster_center[i].clone());
+        luts.push(codebooks_query_gadget(builder, codebooks.clone(), sub_val));
+    }
+
+    let mut lut_set: Vec<Vec<Target>> = Vec::with_capacity(n_probe * M * K);
+    for i in 0..n_probe {
+        for j in 0..M {
+            for k in 0..K {
+                lut_set.push(vec![
+                    const_list[i],
+                    const_list[j],
+                    const_list[k],
+                    luts[i][j][k],
+                ]);
+            }
+        }
+    }
+
+    let mut class_labels: Vec<ACLClassLabelTargets> = Vec::with_capacity(n_acl_max);
+    for j in 0..n_acl_max {
+        class_labels.push(ACLClassLabelTargets {
+            acl_class_id: acl_table.acl_class_ids[j],
+            tenant_id: acl_table.tenant_ids[j],
+            project_id: acl_table.project_ids[j],
+            required_clearance: acl_table.required_clearances[j],
+            state: acl_table.states[j],
+            epoch: acl_table.epochs[j],
+        });
+    }
+
+    for j in 0..n_acl_max {
+        let mut path_row: Vec<Vec<Target>> = Vec::with_capacity(class_depth);
+        for d in 0..class_depth {
+            path_row.push(vec![
+                acl_table.directions[j][d],
+                acl_table.siblings[j][d],
+            ]);
+        }
+        let class_root =
+            verify_acl_class_opening_gadget(builder, &class_labels[j], path_row);
+        builder.connect(class_root, root_acl_class);
+    }
+
+    let class_visibilities = acl_class_policy_once_gadget(
+        builder,
+        user,
+        &class_labels,
+        &acl_table.valids,
+        checkpoint_epoch,
+    );
+
+    let mut vpqss_item_dis: Vec<Vec<Target>> = Vec::with_capacity(n_probe * n);
+    let mut vpqss_set: Vec<Vec<Target>> = Vec::with_capacity(n_probe * n * M);
+    for i in 0..n_probe {
+        for j in 0..n {
+            for k in 0..M {
+                vpqss_set.push(vec![
+                    const_list[i],
+                    const_list[k],
+                    vpqss[i][j][k],
+                    vpqss_dis[i][j][k],
+                ]);
+            }
+
+            let binding_label = ObjectClassBindingTargets {
+                cid: itemss[i][j],
+                acl_class_id: bindings.acl_class_ids[i][j],
+                epoch: bindings.epochs[i][j],
+            };
+            let mut bind_path: Vec<Vec<Target>> = Vec::with_capacity(binding_depth);
+            for d in 0..binding_depth {
+                bind_path.push(vec![
+                    bindings.directions[i][j][d],
+                    bindings.siblings[i][j][d],
+                ]);
+            }
+            let bind_root =
+                verify_object_class_binding_opening_gadget(builder, &binding_label, bind_path);
+            builder.connect(bind_root, root_object_class_binding);
+
+            acl_class_table_match_gadget(
+                builder,
+                valids[i][j],
+                bindings.acl_class_ids[i][j],
+                &acl_table.acl_class_ids,
+                &acl_table.valids,
+                &selectors.selectors[i][j],
+            );
+
+            let slot_visibility = inherit_slot_visibility_from_class_gadget(
+                builder,
+                valids[i][j],
+                &selectors.selectors[i][j],
+                &class_visibilities,
+            );
+
+            let curr_dis = builder.add_many(vpqss_dis[i][j].clone());
+            let hat_d = auth_mask_distance_gadget(
+                builder,
+                valids[i][j],
+                slot_visibility,
+                curr_dis,
+                AUTH_MASK_D_MAX,
+            );
+            vpqss_item_dis.push(vec![itemss[i][j], hat_d]);
+        }
     }
 
     set_equal_gadget(
