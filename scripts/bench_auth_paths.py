@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Phase 2D: lightweight overhead snapshot for AuthView ZK proof paths.
+Phase 2D/2E: AuthView ZK proof path overhead + scaling benchmark.
 
-Compares four paths on the same synthetic IVF-PQ workload:
+Compares four paths on synthetic IVF-PQ workloads:
   baseline, auth_all_visible, auth_policy, auth_committed
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import sys
 from pathlib import Path
 
@@ -18,15 +19,20 @@ import numpy as np
 from auth_reference.attacks import DEFAULT_CHECKPOINT
 from auth_reference.auth_commitment import next_pow2
 from auth_reference.v3db_adapter import (
-    build_candidates_from_v3db_query,
+    V3DBSlotBuffers,
     build_committed_auth_witness,
     build_partial_visible_labels,
     build_synthetic_user_context,
+    candidate_records_from_slot_buffers,
+    compute_v3db_slot_distances,
     encode_slot_auth_labels_for_zk,
     encode_user_context_for_zk,
 )
 from ivf_pq.zk import ivf_pq_learn
-from tests.test_auth_zk_all_visible import _build_merkle_proof_inputs
+from tests.test_auth_zk_all_visible import (
+    _build_merkle_proof_inputs,
+    _compute_cluster_root,
+)
 from zk_IVF_PQ.zk_IVF_PQ import (
     py_set_based_auth_all_visible_with_merkle,
     py_set_based_auth_committed_with_merkle,
@@ -62,7 +68,14 @@ PATH_NAMES = (
 )
 
 
-def _auth_tree_depth(n_probe: int, slot_per_list: int) -> int:
+def _parse_int_list(value: str) -> list[int]:
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("expected at least one integer")
+    return [int(p) for p in parts]
+
+
+def auth_tree_depth(n_probe: int, slot_per_list: int) -> int:
     padded = next_pow2(n_probe * slot_per_list)
     depth = 0
     n = padded
@@ -72,11 +85,7 @@ def _auth_tree_depth(n_probe: int, slot_per_list: int) -> int:
     return depth
 
 
-def _visible_ratio(
-    candidates,
-    user,
-    checkpoint,
-) -> float:
+def _visible_ratio(candidates, user, checkpoint) -> float:
     from auth_reference.policy import compute_visibility
 
     valid = [c for c in candidates if c.valid]
@@ -88,41 +97,124 @@ def _visible_ratio(
     return visible / len(valid)
 
 
+def _learn_base_index(
+    *,
+    num_vectors: int,
+    dim: int,
+    n_list: int,
+    n_iter: int,
+    seed: int,
+):
+    rng = np.random.default_rng(seed)
+    vecs = rng.integers(0, 4096, size=(num_vectors, dim), dtype=np.int64)
+    query = rng.integers(0, 4096, size=dim, dtype=np.int64)
+    learned = ivf_pq_learn(vecs, n_list=n_list, n_iter=n_iter)
+    return query, learned
+
+
+def _resize_proof_inputs(
+    inputs: dict,
+    *,
+    id_groups: dict,
+    quant_vecs: np.ndarray,
+    n_list: int,
+    slot_per_list: int,
+) -> None:
+    """Pad or truncate probed slot buffers; recompute IVF Merkle roots at target capacity."""
+    vpqss = np.asarray(inputs["vpqss"], dtype=np.int64)
+    valids = np.asarray(inputs["valids"], dtype=np.int64)
+    itemss = np.asarray(inputs["itemss"], dtype=np.int64)
+    n_probe, old_cap, m = vpqss.shape
+
+    new_vpqss = np.zeros((n_probe, slot_per_list, m), dtype=np.int64)
+    new_valids = np.zeros((n_probe, slot_per_list), dtype=np.int64)
+    new_itemss = np.zeros((n_probe, slot_per_list), dtype=np.int64)
+    copy_cap = min(old_cap, slot_per_list)
+    new_vpqss[:, :copy_cap, :] = vpqss[:, :copy_cap, :]
+    new_valids[:, :copy_cap] = valids[:, :copy_cap]
+    new_itemss[:, :copy_cap] = itemss[:, :copy_cap]
+
+    inputs["vpqss"] = new_vpqss
+    inputs["valids"] = new_valids
+    inputs["itemss"] = new_itemss
+
+    cluster_idx_dis = inputs["cluster_idx_dis"]
+    cluster_idxes = cluster_idx_dis[:n_probe, 0]
+    ivf_roots = np.zeros((n_list,), dtype=np.uint64)
+    visited = np.zeros((n_list,), dtype=bool)
+
+    for probe_pos, cluster_index in enumerate(cluster_idxes):
+        ci = int(cluster_index)
+        ivf_roots[ci] = _compute_cluster_root(
+            ci,
+            new_vpqss[probe_pos],
+            new_valids[probe_pos],
+            new_itemss[probe_pos],
+        )
+        visited[ci] = True
+
+    quant_vecs = np.asarray(quant_vecs, dtype=np.int64)
+    for ci in range(n_list):
+        if visited[ci]:
+            continue
+        vector_ids = id_groups[ci]
+        vpqs = np.zeros((slot_per_list, m), dtype=np.int64)
+        row_valids = np.zeros((slot_per_list,), dtype=np.int64)
+        items = np.zeros((slot_per_list,), dtype=np.int64)
+        for local_pos, vec_id in enumerate(vector_ids):
+            if local_pos >= slot_per_list:
+                break
+            items[local_pos] = int(vec_id)
+            row_valids[local_pos] = 1
+            vpqs[local_pos, :] = quant_vecs[int(vec_id)]
+        ivf_roots[ci] = _compute_cluster_root(ci, vpqs, row_valids, items)
+
+    inputs["ivf_roots"] = ivf_roots
+    inputs["buffers"] = V3DBSlotBuffers(
+        vpqss=new_vpqss,
+        valids=new_valids,
+        itemss=new_itemss,
+        cluster_idxes=inputs["buffers"].cluster_idxes,
+        capacity=slot_per_list,
+        n_probe=n_probe,
+    )
+
+
 def build_synthetic_workload(
     *,
+    query: np.ndarray,
+    center: np.ndarray,
+    code_books: np.ndarray,
+    quant_vecs: np.ndarray,
+    id_groups: dict,
     num_vectors: int,
     dim: int,
     n_list: int,
     n_probe: int,
     top_k: int,
-    n_iter: int,
-    seed: int,
+    slot_per_list: int | None,
 ):
-    """Mirror test fixtures: IVF-PQ learn + Merkle proof inputs + partial-visible labels."""
-    rng = np.random.default_rng(seed)
-    vecs = rng.integers(0, 4096, size=(num_vectors, dim), dtype=np.int64)
-    query = rng.integers(0, 4096, size=dim, dtype=np.int64)
-    _labels, center, code_books, quant_vecs, id_groups = ivf_pq_learn(
-        vecs, n_list=n_list, n_iter=n_iter
-    )
-
+    """Build proof inputs + auth witnesses for one grid point."""
     inputs = _build_merkle_proof_inputs(
         query, center, code_books, quant_vecs, id_groups, n_probe
     )
+    if slot_per_list is not None:
+        _resize_proof_inputs(
+            inputs,
+            id_groups=id_groups,
+            quant_vecs=quant_vecs,
+            n_list=n_list,
+            slot_per_list=slot_per_list,
+        )
+
     buffers = inputs["buffers"]
-    slot_per_list = int(buffers.capacity)
+    capacity = int(buffers.capacity)
 
     user = build_synthetic_user_context(clearance=10, epoch=DEFAULT_CHECKPOINT.epoch)
     checkpoint = DEFAULT_CHECKPOINT
 
-    _candidates, slot_rows, _buffers = build_candidates_from_v3db_query(
-        query,
-        center,
-        code_books,
-        quant_vecs,
-        id_groups,
-        n_probe,
-        labels={},
+    slot_rows = compute_v3db_slot_distances(
+        query, center, code_books, buffers
     )
     valid_rows = [r for r in slot_rows if r[4]]
     by_dist = sorted(valid_rows, key=lambda r: r[5])
@@ -131,16 +223,7 @@ def build_synthetic_workload(
     labels = build_partial_visible_labels(
         visible_cids, invisible_cids, user, checkpoint
     )
-
-    candidates, _slot_rows, buffers = build_candidates_from_v3db_query(
-        query,
-        center,
-        code_books,
-        quant_vecs,
-        id_groups,
-        n_probe,
-        labels,
-    )
+    candidates = candidate_records_from_slot_buffers(slot_rows, labels)
     user_w = encode_user_context_for_zk(user, checkpoint)
     slot_w = encode_slot_auth_labels_for_zk(buffers, labels)
     committed_w = build_committed_auth_witness(buffers, labels)
@@ -150,11 +233,11 @@ def build_synthetic_workload(
         "dim": dim,
         "n_list": n_list,
         "n_probe": n_probe,
-        "slot_per_list": slot_per_list,
+        "slot_per_list": capacity,
         "top_k": top_k,
-        "N_sel": n_probe * slot_per_list,
+        "N_sel": n_probe * capacity,
         "visible_ratio": _visible_ratio(candidates, user, checkpoint),
-        "auth_tree_depth": _auth_tree_depth(n_probe, slot_per_list),
+        "auth_tree_depth": auth_tree_depth(n_probe, capacity),
     }
 
     return {
@@ -255,37 +338,40 @@ def _row(path: str, repeat_id: int, meta: dict, metrics: tuple) -> dict:
 
 
 def print_summary(rows: list[dict]) -> None:
-    """Print a short stdout summary from repeat_id=0 rows (or first available)."""
-    by_path = {}
-    for row in rows:
-        rid = int(row["repeat_id"])
-        if rid not in by_path.get(row["path"], {}):
-            by_path.setdefault(row["path"], {})[rid] = row
+    """Print scaling summary grouped by workload (repeat_id=0)."""
+    repeat0 = [r for r in rows if int(r["repeat_id"]) == 0]
+    if not repeat0:
+        repeat0 = rows
 
-    def pick(path: str) -> dict | None:
-        paths = by_path.get(path, {})
-        return paths.get(0) or (paths[min(paths)] if paths else None)
+    workloads: dict[tuple[int, int, int], dict[str, dict]] = {}
+    for row in repeat0:
+        key = (int(row["n_probe"]), int(row["slot_per_list"]), int(row["top_k"]))
+        workloads.setdefault(key, {})[row["path"]] = row
 
-    baseline = pick("baseline")
-    committed = pick("auth_committed")
-    policy = pick("auth_policy")
-    if not baseline or not committed:
-        return
-
-    print("\n--- overhead summary (repeat_id=0) ---")
-    print(f"baseline gates:        {baseline['gates']}")
-    if policy:
-        print(f"auth_policy gates:     {policy['gates']}")
-    print(f"committed-auth gates:  {committed['gates']}")
-    b_prove = float(baseline["prove_time"])
-    c_prove = float(committed["prove_time"])
-    b_size = int(baseline["proof_size"])
-    c_size = int(committed["proof_size"])
-    if b_prove > 0:
-        print(f"committed/baseline prove_time ratio: {c_prove / b_prove:.3f}")
-    if b_size > 0:
-        print(f"committed/baseline proof_size ratio: {c_size / b_size:.3f}")
-    print("--------------------------------------\n")
+    print("\n--- scaling summary (repeat_id=0) ---")
+    print(
+        f"{'n_probe':>7} {'slot':>5} {'N_sel':>6} {'depth':>5} "
+        f"{'baseline':>9} {'policy':>9} {'committed':>9} {'c/b gates':>10}"
+    )
+    for key in sorted(workloads):
+        n_probe, slot, top_k = key
+        paths = workloads[key]
+        baseline = paths.get("baseline")
+        policy = paths.get("auth_policy")
+        committed = paths.get("auth_committed")
+        if not baseline or not committed:
+            continue
+        n_sel = int(baseline["N_sel"])
+        depth = int(baseline["auth_tree_depth"])
+        b_gates = int(baseline["gates"])
+        p_gates = int(policy["gates"]) if policy else 0
+        c_gates = int(committed["gates"])
+        ratio = c_gates / b_gates if b_gates else 0.0
+        print(
+            f"{n_probe:7d} {slot:5d} {n_sel:6d} {depth:5d} "
+            f"{b_gates:9d} {p_gates:9d} {c_gates:9d} {ratio:10.3f}"
+        )
+    print("-------------------------------------\n")
 
 
 def run_benchmark(
@@ -295,28 +381,46 @@ def run_benchmark(
     num_vectors: int,
     dim: int,
     n_list: int,
-    n_probe: int,
-    top_k: int,
+    n_probe_list: list[int],
+    slot_per_list_list: list[int | None],
+    top_k_list: list[int],
     n_iter: int,
     seed: int,
 ) -> list[dict]:
     output.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
+    grid = list(
+        itertools.product(n_probe_list, slot_per_list_list, top_k_list)
+    )
 
     for repeat_id in range(repeat):
-        workload = build_synthetic_workload(
+        query, learned = _learn_base_index(
             num_vectors=num_vectors,
             dim=dim,
             n_list=n_list,
-            n_probe=n_probe,
-            top_k=top_k,
             n_iter=n_iter,
             seed=seed + repeat_id,
         )
-        meta = workload["meta"]
-        for path in PATH_NAMES:
-            metrics = run_path(path, workload)
-            rows.append(_row(path, repeat_id, meta, metrics))
+        _labels, center, code_books, quant_vecs, id_groups = learned
+
+        for n_probe, slot_per_list, top_k in grid:
+            workload = build_synthetic_workload(
+                query=query,
+                center=center,
+                code_books=code_books,
+                quant_vecs=quant_vecs,
+                id_groups=id_groups,
+                num_vectors=num_vectors,
+                dim=dim,
+                n_list=n_list,
+                n_probe=n_probe,
+                top_k=top_k,
+                slot_per_list=slot_per_list,
+            )
+            meta = workload["meta"]
+            for path in PATH_NAMES:
+                metrics = run_path(path, workload)
+                rows.append(_row(path, repeat_id, meta, metrics))
 
     with output.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
@@ -329,27 +433,43 @@ def run_benchmark(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark AuthView ZK proof path overhead (Phase 2D)."
+        description="Benchmark AuthView ZK proof paths (overhead + scaling)."
     )
     parser.add_argument(
         "--repeat",
         type=int,
         default=1,
-        help="Number of repetitions per path (default: 1; use 3 for fuller snapshot).",
+        help="Repetitions per (workload, path) grid point (default: 1).",
     )
     parser.add_argument(
         "--output",
         type=Path,
         default=Path("artifacts/auth_zk_path_metrics.csv"),
-        help="CSV output path (default: artifacts/auth_zk_path_metrics.csv).",
+        help="CSV output path.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-vectors", type=int, default=400)
     parser.add_argument("--dim", type=int, default=64)
     parser.add_argument("--n-list", type=int, default=8)
-    parser.add_argument("--n-probe", type=int, default=4)
-    parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--n-iter", type=int, default=8)
+    parser.add_argument(
+        "--n-probe-list",
+        type=_parse_int_list,
+        default=_parse_int_list("4"),
+        help='Comma-separated n_probe values, e.g. "2,4".',
+    )
+    parser.add_argument(
+        "--slot-per-list-list",
+        type=_parse_int_list,
+        default=_parse_int_list("64"),
+        help='Comma-separated slot capacities, e.g. "32,64,128".',
+    )
+    parser.add_argument(
+        "--top-k-list",
+        type=_parse_int_list,
+        default=_parse_int_list("5"),
+        help='Comma-separated top_k values, e.g. "3,5".',
+    )
     return parser.parse_args(argv)
 
 
@@ -365,12 +485,17 @@ def main(argv: list[str] | None = None) -> int:
         num_vectors=args.num_vectors,
         dim=args.dim,
         n_list=args.n_list,
-        n_probe=args.n_probe,
-        top_k=args.top_k,
+        n_probe_list=args.n_probe_list,
+        slot_per_list_list=args.slot_per_list_list,
+        top_k_list=args.top_k_list,
         n_iter=args.n_iter,
         seed=args.seed,
     )
-    print(f"Wrote {len(rows)} rows to {args.output}")
+    n_workloads = len(args.n_probe_list) * len(args.slot_per_list_list) * len(args.top_k_list)
+    print(
+        f"Wrote {len(rows)} rows ({n_workloads} workloads × "
+        f"{len(PATH_NAMES)} paths × {args.repeat} repeats) to {args.output}"
+    )
     return 0
 
 
