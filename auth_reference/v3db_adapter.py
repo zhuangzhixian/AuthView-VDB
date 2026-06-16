@@ -527,3 +527,117 @@ def build_committed_auth_witness(
         "object_states": states,
         "object_epochs": epochs,
     }
+
+
+def slot_labels_from_cid_map(
+    buffers: V3DBSlotBuffers,
+    labels: dict[int, AuthLabel],
+    *,
+    default_label: AuthLabel | None = None,
+) -> dict[tuple[int, int], "SlotAuthLabel"]:
+    """
+    Map cid-keyed auth labels to `(list_id, slot_id)` for slot-aligned trees.
+
+    Uses `buffers.cluster_idxes[i]` as list_id and slot column `j`.
+    """
+    from auth_reference.slot_aligned_auth_commitment import SlotAuthLabel
+
+    default = default_label or AuthLabel(
+        tenant="acme",
+        project="proj-a",
+        level=1,
+        state="active",
+        epoch=1,
+    )
+    n_probe, capacity = buffers.valids.shape
+    out: dict[tuple[int, int], SlotAuthLabel] = {}
+    for i in range(n_probe):
+        list_id = int(buffers.cluster_idxes[i])
+        for j in range(capacity):
+            if not bool(buffers.valids[i, j]):
+                continue
+            cid = int(buffers.itemss[i, j])
+            label = labels.get(cid, default)
+            t, p, lv, st, ep = _encode_auth_label_for_zk(label)
+            out[(list_id, j)] = SlotAuthLabel(
+                list_id, j, cid, t, p, lv, st, ep
+            )
+    return out
+
+
+def split_slot_aligned_paths_for_zk(
+    witness: "SlotAlignedAuthWitness",
+) -> dict[str, int | list[int] | list[list[int]] | list[list[list[int]]]]:
+    """
+    Flatten `SlotAlignedAuthWitness` into PyO3 array layout.
+
+    Top path is semantically shared per probed list; arrays are `[n_probe][depth_top]`
+    with duplicate rows when the same list is probed more than once.
+    """
+    n_probe = len(witness.probe_list_ids)
+    list_ids: list[int] = []
+    list_auth_roots: list[int] = []
+    top_dirs: list[list[int]] = []
+    top_sibs: list[list[int]] = []
+    intra_dirs: list[list[list[int]]] = []
+    intra_sibs: list[list[list[int]]] = []
+
+    for i in range(n_probe):
+        list_id = int(witness.probe_list_ids[i])
+        list_op = witness.shared_list_openings[list_id]
+        list_ids.append(list_id)
+        list_auth_roots.append(int(list_op.list_auth_root))
+        top_dirs.append(list(list_op.top_path_directions))
+        top_sibs.append(list(list_op.top_path_siblings))
+
+        row_d: list[list[int]] = []
+        row_s: list[list[int]] = []
+        for slot_op in witness.slot_openings[i]:
+            row_d.append(list(slot_op.intra_path_directions))
+            row_s.append(list(slot_op.intra_path_siblings))
+        intra_dirs.append(row_d)
+        intra_sibs.append(row_s)
+
+    return {
+        "root_auth": int(witness.root_auth),
+        "list_ids": list_ids,
+        "list_auth_roots": list_auth_roots,
+        "top_path_directions": top_dirs,
+        "top_path_siblings": top_sibs,
+        "intra_path_directions": intra_dirs,
+        "intra_path_siblings": intra_sibs,
+        "object_tenant_ids": witness.object_tenant_ids,
+        "object_project_ids": witness.object_project_ids,
+        "object_levels": witness.object_levels,
+        "object_states": witness.object_states,
+        "object_epochs": witness.object_epochs,
+    }
+
+
+def build_slot_aligned_zk_witness_for_buffers(
+    buffers: V3DBSlotBuffers,
+    labels: dict[int, AuthLabel],
+    *,
+    n_list: int,
+    default_label: AuthLabel | None = None,
+) -> dict[str, int | list[int] | list[list[int]] | list[list[list[int]]]]:
+    """Build slot-aligned committed-auth ZK witness from V3DB buffers + cid labels."""
+    from auth_reference.slot_aligned_auth_commitment import (
+        build_slot_aligned_auth_witness_for_buffers,
+    )
+
+    slot_labels = slot_labels_from_cid_map(
+        buffers, labels, default_label=default_label
+    )
+    witness = build_slot_aligned_auth_witness_for_buffers(
+        buffers, slot_labels, n_list=n_list
+    )
+    return split_slot_aligned_paths_for_zk(witness)
+
+
+def top_k_cids_from_slot_aligned_ordered(
+    ordered: list[list[int]],
+    top_k: int,
+) -> list[int]:
+    """Alias: slot-aligned path uses the same ordered (cid, hat_d) witness."""
+    return top_k_cids_from_ordered(ordered, top_k)

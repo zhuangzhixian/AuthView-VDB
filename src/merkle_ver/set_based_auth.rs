@@ -7,6 +7,10 @@ use crate::merkle_ver::auth_mask_gadget::{auth_mask_distance_gadget, AUTH_MASK_D
 use crate::merkle_ver::auth_policy_gadget::{
     auth_policy_visibility_gadget, ObjectLabelTargets, UserContextTargets,
 };
+use crate::merkle_ver::slot_aligned_auth_commitment_gadget::{
+    list_id_top_path_binding_gadget, slot_aligned_probe_row_verify_gadget,
+    SlotAlignedSlotWitness,
+};
 use crate::merkle_ver::standalone_commitment::standalone_commitment_gadget;
 use crate::pq_flat::gadgets::codebooks_query_gadget;
 use crate::pq_flat_verify::gadgets::set_belong_gedget;
@@ -425,6 +429,212 @@ pub fn set_based_auth_ivf_pq_gadget_committed(
             );
             vpqss_item_dis.push(vec![itemss[i][j], hat_d]);
         }
+    }
+
+    set_equal_gadget(
+        builder,
+        fs_hash[2],
+        fs_hash[3],
+        vpqss_item_dis,
+        ordered_vpqss_item_dis.clone(),
+    );
+    for i in 0..(n_probe * n - 1) {
+        let flag = comp_gadget(
+            builder,
+            ordered_vpqss_item_dis[i][1].clone(),
+            ordered_vpqss_item_dis[i + 1][1].clone(),
+        );
+        builder.connect(flag, const_list[0]);
+    }
+    set_belong_gedget(builder, fs_hash[4..].to_vec(), vpqss_set, lut_set, f_, t_);
+    for i in 0..top_k {
+        builder.register_public_input(ordered_vpqss_item_dis[i][0]);
+    }
+
+    if merkled {
+        standalone_commitment_gadget(
+            builder,
+            query.clone(),
+            root.clone(),
+            codebooks_root.clone(),
+            codebooks.clone(),
+            ivf_center.clone(),
+            ivf_roots.clone(),
+            cluster_idxes,
+            cluster_center.clone(),
+            valids.clone(),
+            itemss.clone(),
+            cluster_pairs.clone(),
+            vpqss.clone(),
+        );
+    }
+}
+
+/// Per-probe-row top-level slot-aligned auth Merkle witness: `[n_probe][depth_top]`.
+pub struct SlotAlignedTopWitnessTargets {
+    pub list_ids: Vec<Target>,
+    pub list_auth_roots: Vec<Target>,
+    pub directions: Vec<Vec<Target>>,
+    pub siblings: Vec<Vec<Target>>,
+}
+
+/// Per-slot intra-list Merkle witness: `[n_probe][n][depth_slot]`.
+pub struct SlotAlignedIntraWitnessTargets {
+    pub directions: Vec<Vec<Vec<Target>>>,
+    pub siblings: Vec<Vec<Vec<Target>>>,
+}
+
+/// AuthView set-based IVF-PQ gadget with slot-aligned committed auth labels.
+pub fn set_based_auth_ivf_pq_gadget_committed_slot_aligned(
+    builder: &mut CircuitBuilder<F, D>,
+    fs_hash: Vec<Target>,
+    query: Vec<Target>,
+    top_k: usize,
+    root: Target,
+    codebooks_root: Target,
+    codebooks: Vec<Vec<Vec<Target>>>,
+    ivf_center: Vec<Vec<Target>>,
+    ivf_roots: Vec<Target>,
+    cluster_center: Vec<Vec<Target>>,
+    valids: Vec<Vec<Target>>,
+    itemss: Vec<Vec<Target>>,
+    cluster_pairs: Vec<Vec<Vec<Target>>>,
+    vpqss: Vec<Vec<Vec<Target>>>,
+    vpqss_dis: Vec<Vec<Vec<Target>>>,
+    ordered_vpqss_item_dis: Vec<Vec<Target>>,
+    cluster_idx_dis: Vec<Vec<Target>>,
+    root_auth: Target,
+    user: &UserContextTargets,
+    checkpoint_epoch: Target,
+    slot_labels: &SlotAuthLabelTargets,
+    top_witness: &SlotAlignedTopWitnessTargets,
+    intra_witness: &SlotAlignedIntraWitnessTargets,
+    top_depth: usize,
+    intra_depth: usize,
+    f_: Vec<Target>,
+    t_: Vec<Target>,
+    merkled: bool,
+) {
+    builder.register_public_input(root_auth);
+
+    let M = codebooks.len();
+    let K = codebooks[0].len();
+    let n = valids[0].len();
+    let n_probe = cluster_center.len();
+    let cluster_idxes: Vec<Target> = (0..n_probe)
+        .map(|i| cluster_idx_dis[i][0].clone())
+        .collect();
+    let const_list = const_gen_gadget(
+        builder,
+        max(max(n_probe as u64, n as u64), max(M as u64, K as u64)),
+    );
+
+    static_nn_gadget(
+        builder,
+        fs_hash[0],
+        fs_hash[1],
+        ivf_center.clone(),
+        query.clone(),
+        cluster_idx_dis.clone(),
+    );
+
+    let mut luts: Vec<Vec<Vec<Target>>> = Vec::with_capacity(n_probe);
+    for i in 0..n_probe {
+        let sub_val = vec_sub_gadget(builder, query.clone(), cluster_center[i].clone());
+        luts.push(codebooks_query_gadget(builder, codebooks.clone(), sub_val));
+    }
+
+    let mut lut_set: Vec<Vec<Target>> = Vec::with_capacity(n_probe * M * K);
+    for i in 0..n_probe {
+        for j in 0..M {
+            for k in 0..K {
+                lut_set.push(vec![
+                    const_list[i],
+                    const_list[j],
+                    const_list[k],
+                    luts[i][j][k],
+                ]);
+            }
+        }
+    }
+
+    let mut vpqss_item_dis: Vec<Vec<Target>> = Vec::with_capacity(n_probe * n);
+    let mut vpqss_set: Vec<Vec<Target>> = Vec::with_capacity(n_probe * n * M);
+    for i in 0..n_probe {
+        builder.connect(top_witness.list_ids[i], cluster_idxes[i]);
+
+        let mut top_path: Vec<Vec<Target>> = Vec::with_capacity(top_depth);
+        for d in 0..top_depth {
+            top_path.push(vec![
+                top_witness.directions[i][d],
+                top_witness.siblings[i][d],
+            ]);
+        }
+        list_id_top_path_binding_gadget(
+            builder,
+            top_witness.list_ids[i],
+            &top_path,
+            top_depth,
+        );
+
+        let mut slots: Vec<SlotAlignedSlotWitness> = Vec::with_capacity(n);
+        for j in 0..n {
+            for k in 0..M {
+                vpqss_set.push(vec![
+                    const_list[i],
+                    const_list[k],
+                    vpqss[i][j][k],
+                    vpqss_dis[i][j][k],
+                ]);
+            }
+
+            let commitment_label = AuthLabelCommitmentTargets {
+                cid: itemss[i][j],
+                tenant: slot_labels.object_tenant_ids[i][j],
+                project: slot_labels.object_project_ids[i][j],
+                level: slot_labels.object_levels[i][j],
+                state: slot_labels.object_states[i][j],
+                epoch: slot_labels.object_epochs[i][j],
+            };
+            let mut intra_path: Vec<Vec<Target>> = Vec::with_capacity(intra_depth);
+            for d in 0..intra_depth {
+                intra_path.push(vec![
+                    intra_witness.directions[i][j][d],
+                    intra_witness.siblings[i][j][d],
+                ]);
+            }
+            slots.push(SlotAlignedSlotWitness {
+                label: commitment_label,
+                intra_path,
+            });
+
+            let policy_label = ObjectLabelTargets {
+                object_tenant_id: slot_labels.object_tenant_ids[i][j],
+                object_project_id: slot_labels.object_project_ids[i][j],
+                object_level: slot_labels.object_levels[i][j],
+                object_state: slot_labels.object_states[i][j],
+                object_epoch: slot_labels.object_epochs[i][j],
+            };
+            let curr_dis = builder.add_many(vpqss_dis[i][j].clone());
+            let visibility =
+                auth_policy_visibility_gadget(builder, user, &policy_label, checkpoint_epoch);
+            let hat_d = auth_mask_distance_gadget(
+                builder,
+                valids[i][j],
+                visibility,
+                curr_dis,
+                AUTH_MASK_D_MAX,
+            );
+            vpqss_item_dis.push(vec![itemss[i][j], hat_d]);
+        }
+
+        slot_aligned_probe_row_verify_gadget(
+            builder,
+            top_witness.list_auth_roots[i],
+            top_path,
+            root_auth,
+            &slots,
+        );
     }
 
     set_equal_gadget(

@@ -83,6 +83,45 @@ pub fn slot_aligned_probe_row_verify_gadget(
     builder.connect(top_root, root_auth);
 }
 
+/// Decompose `value` into `num_bits` little-endian bits constrained to `{0,1}`.
+fn u64_bit_decompose_gadget(
+    builder: &mut CircuitBuilder<F, D>,
+    value: Target,
+    num_bits: usize,
+) -> Vec<Target> {
+    let bits: Vec<Target> = (0..num_bits)
+        .map(|_| builder.add_virtual_target())
+        .collect();
+    let two = builder.two();
+    let mut pow = builder.one();
+    let mut sum = builder.zero();
+    for bit in &bits {
+        static_lookup_gadget(builder, *bit, vec![0, 1]);
+        let term = builder.mul(*bit, pow);
+        sum = builder.add(sum, term);
+        pow = builder.mul(pow, two);
+    }
+    builder.connect(sum, value);
+    bits
+}
+
+/// Bind top-level Merkle path directions to `list_id` (LSB-first path order).
+///
+/// `path[level][0]` must equal bit `level` of `list_id` (bit 0 = LSB), matching
+/// `hash_tree_path` / `open_auth_label` direction order.
+pub fn list_id_top_path_binding_gadget(
+    builder: &mut CircuitBuilder<F, D>,
+    list_id: Target,
+    top_path: &[Vec<Target>],
+    top_depth: usize,
+) {
+    let bits = u64_bit_decompose_gadget(builder, list_id, top_depth);
+    for level in 0..top_depth {
+        static_lookup_gadget(builder, top_path[level][0], vec![0, 1]);
+        builder.connect(top_path[level][0], bits[level]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +528,46 @@ mod tests {
         set_label(&mut pw, &witnesses[1].label, 201, 2, 10, 1, 1, 7);
         set_path(&mut pw, &witnesses[1].intra_path, &hash_tree_path(0, intra2));
 
+        assert!(data.prove(pw).is_err());
+    }
+
+    #[test]
+    fn list_id_top_path_binding_accepts_matching_bits() {
+        let fx = two_level_fixture();
+        let top_depth = tree_depth(4);
+        let list_id = 1u64;
+        let top_path_u64 = hash_tree_path(list_id, fx.top_tree.clone());
+
+        let mut builder = make_builder();
+        let list_id_t = builder.add_virtual_target();
+        let top_path = add_path_targets(&mut builder, top_depth);
+        list_id_top_path_binding_gadget(&mut builder, list_id_t, &top_path, top_depth);
+
+        let data = builder.build::<C>();
+        let mut pw = PartialWitness::new();
+        pw.set_target(list_id_t, F::from_canonical_u64(list_id))
+            .unwrap();
+        set_path(&mut pw, &top_path, &top_path_u64);
+        assert!(data.prove(pw).is_ok());
+    }
+
+    #[test]
+    fn list_id_top_path_binding_rejects_mismatched_bits() {
+        let fx = two_level_fixture();
+        let top_depth = tree_depth(4);
+        let list_id = 1u64;
+        let wrong_path = hash_tree_path(2, fx.top_tree.clone());
+
+        let mut builder = make_builder();
+        let list_id_t = builder.add_virtual_target();
+        let top_path = add_path_targets(&mut builder, top_depth);
+        list_id_top_path_binding_gadget(&mut builder, list_id_t, &top_path, top_depth);
+
+        let data = builder.build::<C>();
+        let mut pw = PartialWitness::new();
+        pw.set_target(list_id_t, F::from_canonical_u64(list_id))
+            .unwrap();
+        set_path(&mut pw, &top_path, &wrong_path);
         assert!(data.prove(pw).is_err());
     }
 }
