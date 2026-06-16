@@ -415,6 +415,312 @@ PYTHONPATH=. python scripts/audit_proof_planning_layout_model.py \
 
 ---
 
+## Phase 6B-2.11: Repaired Layout Figures
+
+**Status:** paper-ready candidate figures from repaired access-signature model (sanity 10/10).
+
+### Do not use Phase 6B-2.9 layout figures
+
+The following were generated from the **broken role-combination workload** and must **not** appear in the paper:
+
+- `proof_planning_sa_pa_tradeoff.pdf`
+- `proof_planning_layout_cost_breakdown.pdf`
+- `proof_planning_layout_impure_ratio.pdf`
+- `proof_planning_layout_selectivity_sensitivity.pdf`
+
+See [phase6_layout_model_failure_analysis.md](phase6_layout_model_failure_analysis.md).
+
+### Repaired figure set
+
+All filenames use the `repaired_` prefix. Data source:
+
+- `artifacts/proof_planning_layout_summary_repaired.csv`
+- `artifacts/proof_planning_layout_metrics_repaired.csv`
+
+Figures slice **effective selectivity ≈ 0.5** via query role closest to 0.5 in metrics (role 4, median eff_sel ≈ 0.54), aggregated over seeds.
+
+```bash
+PYTHONPATH=. python scripts/plot_proof_planning_layout_figures.py \
+  --summary artifacts/proof_planning_layout_summary_repaired.csv \
+  --metrics artifacts/proof_planning_layout_metrics_repaired.csv \
+  --output-dir artifacts/figures
+```
+
+| Figure | File | Story |
+|--------|------|-------|
+| SA/PA frontier | `repaired_sa_pa_frontier.pdf` | Global = low SA, high PA; oracle = high SA, low PA; merged-k traces continuous trade-off |
+| Merged-k sensitivity | `repaired_merged_k_sensitivity.pdf` | k↑ → SA↓, PA↑ (dual axis, merged-k only) |
+| Cost breakdown | `repaired_layout_cost_breakdown.pdf` | PA drop vs global driven mainly by distance/ADC component |
+| Impure vs PA | `repaired_impure_vs_pa.pdf` | Higher impure_valid_ratio → higher PA_plan |
+| Selectivity (optional) | `repaired_selectivity_sensitivity.pdf` | PA vs effective selectivity by layout; acl/oracle PA close but SA differs — use SA/PA frontier as main figure |
+
+### Core narrative (repaired model)
+
+1. **Global:** lowest $SA_{\mathrm{commit}}$, highest $PA_{\mathrm{plan}}$ — single impure region, max proof fallback.
+2. **Oracle authorized-view:** highest $SA_{\mathrm{commit}}$, lowest $PA_{\mathrm{plan}}$ (= 1.0 by construction) — role-view replication cost.
+3. **Merged-k:** monotone trade-off curve between global and fine-grained layouts as k decreases.
+4. **ACL-signature:** $PA_{\mathrm{plan}}$ near oracle, but **lower** $SA_{\mathrm{commit}}$ — per-signature regions without full role-view replication.
+5. **Impure ratio:** $N_{\mathrm{impure}}/N_{\mathrm{valid}}$ explains residual $PA_{\mathrm{plan}}$ above oracle (especially merged-k at large k).
+
+All axes labeled **cost model** — not measured ZK gates.
+
+### Artifact cleanup plan (do not delete yet)
+
+After repaired figures pass review, archive or remove legacy exploratory PDFs:
+
+| Pattern / file | Origin |
+|----------------|--------|
+| `proof_planning_locality_*.pdf` | Phase 6B-2.7 |
+| `proof_planning_heatmap_cost.pdf` | Phase 6B-2.8 |
+| `proof_planning_cost_breakdown.pdf` | Phase 6B-2.8 |
+| `proof_planning_degradation_curve.pdf` | Phase 6B-2.8 |
+| `proof_planning_granularity_sensitivity.pdf` | Phase 6B-2.8 |
+| `proof_planning_sa_pa_tradeoff.pdf` | Phase 6B-2.9 (broken) |
+| `proof_planning_layout_cost_breakdown.pdf` | Phase 6B-2.9 (broken) |
+| `proof_planning_layout_impure_ratio.pdf` | Phase 6B-2.9 (broken) |
+| `proof_planning_layout_selectivity_sensitivity.pdf` | Phase 6B-2.9 (broken) |
+
+**Action:** move to `artifacts/figures/archive/` or delete in a dedicated cleanup PR after paper figure sign-off.
+
+---
+
+## Phase 6B-2.12: Final Figure Selection
+
+**Status:** final paper candidates from repaired access-signature model.
+
+### Final figure set (use in paper)
+
+Data slice: query role closest to effective selectivity 0.5 (role 4, median eff_sel ≈ 0.54), aggregated over seeds.
+
+```bash
+PYTHONPATH=. python scripts/plot_proof_planning_layout_figures.py \
+  --summary artifacts/proof_planning_layout_summary_repaired.csv \
+  --metrics artifacts/proof_planning_layout_metrics_repaired.csv \
+  --output-dir artifacts/figures
+```
+
+| Role | File | Paper placement |
+|------|------|-----------------|
+| **Main Fig A** | `final_sa_pa_frontier.pdf` | Storage–proof trade-off; merged-k curve + Global / ACL / Oracle bound |
+| **Main Fig B** | `final_merged_k_sensitivity.pdf` | Merged-k as continuous design knob (dual panel: PA↑, SA↓ as k↑) |
+| **Main Fig C** | `final_normalized_cost_breakdown.pdf` | Normalized planned cost (Global = 1.0); savings from distance/ADC |
+| **Supplementary** | `final_impure_vs_pa.pdf` | Mechanism: impure fallback drives PA |
+
+### Key narrative points
+
+1. **Global:** lowest $SA_{\mathrm{commit}}$, highest $PA_{\mathrm{plan}}$.
+2. **Oracle bound:** highest $SA_{\mathrm{commit}}$, lowest $PA_{\mathrm{plan}}$ (= 1.0 by construction).
+3. **Merged-k:** the **continuous design-space knob** — tune k to trace the SA/PA frontier between Global and fine-grained layouts.
+4. **ACL-signature vs Oracle:** $PA_{\mathrm{plan}}$ are **close by design** (both pure regions); the meaningful difference is **$SA_{\mathrm{commit}}$** (role-view replication vs per-signature regions). Do not over-interpret PA gap.
+5. **Impure ratio:** explains residual $PA_{\mathrm{plan}}$ above oracle for large-k merged layouts.
+
+All figures labeled **cost model** — not measured ZK gates.
+
+### Deprecated figures (do not use in paper)
+
+| File | Reason |
+|------|--------|
+| `repaired_selectivity_sensitivity.pdf` | Connected points across different query roles / configs — **no valid continuous-curve semantics** |
+| `repaired_sa_pa_frontier.pdf` | Superseded by `final_sa_pa_frontier.pdf` (crowded labels, legend overlap) |
+| `repaired_merged_k_sensitivity.pdf` | Superseded by dual-panel `final_merged_k_sensitivity.pdf` (dual y-axis unclear) |
+| `repaired_layout_cost_breakdown.pdf` | Superseded by normalized `final_normalized_cost_breakdown.pdf` |
+| `repaired_impure_vs_pa.pdf` | Superseded by `final_impure_vs_pa.pdf` (cleaner endpoint markers) |
+| Phase 6B-2.9 `proof_planning_layout_*.pdf` | Broken role-combination workload |
+| Phase 6B-2.7/2.8 locality/beta figures | Exploratory; superseded by layout SA/PA story |
+
+### Artifact cleanup recommendation
+
+After final figures are accepted in paper draft:
+
+1. Move deprecated PDFs to `artifacts/figures/archive/`.
+2. Keep only `final_*.pdf` in the active figures directory.
+3. Do not regenerate `repaired_*` or selectivity sensitivity plots.
+
+---
+
+## Phase 6B-2.13: Strict Final Figure Selection
+
+**Status:** strict presentation spec for main paper figures (model unchanged).
+
+### Main figures (paper — three only)
+
+```bash
+PYTHONPATH=. python scripts/plot_proof_planning_layout_figures.py \
+  --summary artifacts/proof_planning_layout_summary_repaired.csv \
+  --metrics artifacts/proof_planning_layout_metrics_repaired.csv \
+  --output-dir artifacts/figures
+```
+
+| # | File | Role |
+|---|------|------|
+| 1 | `main_sa_pa_frontier_zoom.pdf` | Zoomed SA/PA frontier (x ∈ [0.95, 1.55]); Oracle off-scale as dashed PA=1 line + caption |
+| 2 | `main_merged_k_sensitivity_dual_axis.pdf` | Merged-k design knob; dual y-axis (PA red, SA blue) |
+| 3 | `main_normalized_cost_breakdown.pdf` | 5 bars, 3 muted components; Global = 1.0 baseline; no Oracle bar |
+
+Data slice: query role closest to effective selectivity 0.5 (role 4).
+
+### Appendix (optional, not main)
+
+| File | Role |
+|------|------|
+| `appendix_impure_vs_pa.pdf` | Sanity explanation only — impure fallback drives PA; **not a main figure** |
+
+### Presentation fixes vs Phase 6B-2.12
+
+| Issue (6B-2.12) | Fix (6B-2.13) |
+|-----------------|---------------|
+| Oracle point compresses frontier | Oracle removed from axes; PA=1 dashed line + off-scale caption |
+| Cost breakdown too busy | 5 bars (no Oracle), 3 stacked components, muted palette |
+| Impure vs PA as main candidate | Moved to appendix only |
+| Dual-panel merged-k | Restored dual y-axis per spec |
+
+### Deprecated figures (do not use)
+
+**Phase 6B-2.12 superseded:**
+
+- `final_sa_pa_frontier.pdf`
+- `final_merged_k_sensitivity.pdf`
+- `final_normalized_cost_breakdown.pdf`
+- `final_impure_vs_pa.pdf`
+
+**Earlier exploratory / broken:**
+
+- `repaired_selectivity_sensitivity.pdf` — invalid cross-config lines
+- All `repaired_*.pdf`, Phase 6B-2.9 `proof_planning_layout_*.pdf`
+- Phase 6B-2.7/2.8 locality/beta figures (`proof_planning_locality_*`, heatmap, degradation, etc.)
+
+### Artifact cleanup recommendation
+
+Move all deprecated PDFs to `artifacts/figures/archive/`; keep only `main_*.pdf` (+ optional `appendix_*.pdf`) active.
+
+---
+
+## Phase 6B-2.14: Separate Subfigure Redesign
+
+**Status:** Veda-style standalone PDFs for LaTeX `subfigure` / `subcaption` composition.
+
+### Why separate PDFs (no multipanel)
+
+Multipanel figures compress font sizes, obscure legends, and make revision costly. System papers (e.g. Veda) typically export **one plot per PDF** and compose in LaTeX at `0.30–0.33\textwidth` per subfigure. This phase follows that pattern.
+
+### Data slice
+
+- Source: `artifacts/proof_planning_layout_metrics_repaired.csv` (metrics slice preferred over summary aggregate).
+- Query role closest to effective selectivity 0.5 → **role 4** (median eff_sel ≈ 0.54), aggregated over seeds.
+
+```bash
+PYTHONPATH=. python scripts/plot_proof_planning_layout_figures.py \
+  --summary artifacts/proof_planning_layout_summary_repaired.csv \
+  --metrics artifacts/proof_planning_layout_metrics_repaired.csv \
+  --output-dir artifacts/figures
+```
+
+### Recommended paper subfigures (three)
+
+| File | Role |
+|------|------|
+| `main_merged_k_knob.pdf` | **Primary** — merged-k as continuous design knob (dual y-axis: PA↑, SA↓) |
+| `main_cost_breakdown_clean.pdf` | Savings from Distance/ADC component (Global = 1.0) |
+| `main_impure_fallback_clean.pdf` | Mechanism — impure fallback drives PA |
+
+### Optional / appendix
+
+| File | Role |
+|------|------|
+| `main_sa_pa_frontier_clean.pdf` | Design-space overview; use only if visual clarity acceptable — **not required in main text** |
+
+### Narrative
+
+- **Merged-k** is the continuous design-space knob between Global and fine-grained layouts.
+- **Global / ACL / Oracle** are endpoint references; Oracle vs ACL differs mainly in **SA**, not PA — Oracle should not dominate every cost figure.
+- **Impure fallback** explains PA rise when regions are impure (mechanism subfigure).
+
+### Palette (Veda-style)
+
+| Element | Color |
+|---------|-------|
+| Auth/region proof | `#F1D097` |
+| Distance/ADC | `#45A8BB` |
+| Mask + top-k / PA line | `#CB5623` |
+| SA line | `#45A8BB` |
+| Reference markers | `#666666` |
+
+Figure size: ~3.35 × 2.55 in; axis labels 9–10 pt; grid α ≤ 0.18.
+
+### LaTeX usage
+
+```latex
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}[t]{0.32\textwidth}
+    \includegraphics[width=\linewidth]{figures/main_merged_k_knob.pdf}
+    \caption{Merged-k knob (cost model).}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.32\textwidth}
+    \includegraphics[width=\linewidth]{figures/main_cost_breakdown_clean.pdf}
+    \caption{Normalized cost breakdown.}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.32\textwidth}
+    \includegraphics[width=\linewidth]{figures/main_impure_fallback_clean.pdf}
+    \caption{Impure fallback vs.\ PA.}
+  \end{subfigure}
+  \caption{Access-aware layout proof-planning cost model (plaintext work units, not ZK gates).}
+\end{figure}
+```
+
+Do **not** force `main_sa_pa_frontier_clean.pdf` into main text if it feels crowded; explain Oracle off-scale in caption instead.
+
+### Deprecated figures
+
+All prior layout figure iterations and exploratory sweeps:
+
+- `main_sa_pa_frontier_zoom.pdf`, `main_merged_k_sensitivity_dual_axis.pdf`, `main_normalized_cost_breakdown.pdf`, `appendix_impure_vs_pa.pdf` (6B-2.13)
+- `final_*.pdf`, `repaired_*.pdf` (6B-2.11/2.12)
+- `proof_planning_layout_*.pdf` (6B-2.9 broken)
+- `proof_planning_locality_*.pdf`, `proof_planning_beta_*.pdf`, heatmap/degradation/granularity (6B-2.7/2.8)
+- `repaired_selectivity_sensitivity.pdf`, any selectivity sensitivity figure
+
+**Do not generate:** `main_layout_tradeoff_multipanel.pdf`, selectivity sensitivity, locality/beta figures.
+
+### Artifact cleanup recommendation
+
+After LaTeX integration: archive all deprecated PDFs; keep only `main_merged_k_knob.pdf`, `main_cost_breakdown_clean.pdf`, `main_impure_fallback_clean.pdf`, and optionally `main_sa_pa_frontier_clean.pdf`.
+
+---
+
+## Artifact Cleanup Result
+
+**Phase:** 6 artifact cleanup (executed 2026-06-16)
+
+### Active paper-candidate figures
+
+Located in `artifacts/figures/`:
+
+| File | Recommendation |
+|------|----------------|
+| `main_merged_k_knob.pdf` | **Main text** — merged-k design knob (dual y-axis PA/SA) |
+| `main_cost_breakdown_clean.pdf` | **Main text** — normalized cost breakdown (Global = 1.0) |
+| `main_impure_fallback_clean.pdf` | **Optional / appendix** — impure fallback mechanism |
+| `main_sa_pa_frontier_clean.pdf` | **Backup / appendix** — SA/PA frontier overview |
+
+### Archived exploratory figures
+
+| Item | Value |
+|------|-------|
+| Archive path | `artifacts/figures/archive/phase6_exploratory/` |
+| Archived file count | 33 PDFs |
+
+Includes all Phase 6B exploratory iterations: locality/beta sweeps, repaired/final/main_zoom variants, 6B-2.9 broken layout figures, selectivity sensitivity, and prior appendix exports. **No PDFs were deleted** — only moved.
+
+### Paper recommendation
+
+- **Main text:** compose `main_merged_k_knob.pdf` + `main_cost_breakdown_clean.pdf` as LaTeX subfigures (see Phase 6B-2.14).
+- **Appendix (optional):** `main_impure_fallback_clean.pdf` for mechanism explanation.
+- **Appendix (backup):** `main_sa_pa_frontier_clean.pdf` only if design-space overview adds clarity.
+- **Archived figures:** not paper candidates; retained for reproducibility and audit trail only.
+
+---
+
 ## Related
 
 - [phase6_proof_planning_cost_model_log.md](phase6_proof_planning_cost_model_log.md) — Phase 6B-2
