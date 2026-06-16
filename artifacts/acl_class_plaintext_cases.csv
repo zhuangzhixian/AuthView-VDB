@@ -1,0 +1,5 @@
+case_id,N_sel,N_acl,N_vis,acl_ratio,visible_ratio,object_level_policy_evals,acl_class_policy_evals,estimated_cost_object_level,estimated_cost_acl_class,expected_equivalent,observed_equivalent
+compliant_mixed,6,2,4,0.3333,0.6667,6,2,12,10,true,true
+post_filter_contrast,4,2,2,0.5000,0.5000,4,2,8,8,true,true
+all_same_class,6,1,6,0.1667,1.0000,6,1,12,8,true,true
+degenerate_one_class_per_object,6,6,4,1.0000,0.6667,6,6,12,18,true,true
