@@ -1,0 +1,11 @@
+check_id,description,passed,detail
+oracle_has_highest_SA,Oracle SA_commit >= all other layouts,true,"oracle=4.6301, global=1.0200, acl=1.4375"
+oracle_has_lowest_PA,Oracle PA_plan <= all other base layouts,true,"oracle=1.0000, global=4.8760, acl=1.0246"
+global_has_low_SA_high_PA,Global SA low and PA high vs oracle,true,SA global=1.0200 oracle=4.6301; PA global=4.8760 oracle=1.0000
+acl_signature_between_global_and_oracle,ACL-signature PA between global and oracle; SA between global and oracle,true,PA oracle=1.0000 acl=1.0246 global=4.8760; SA global=1.0200 acl=1.4375 oracle=4.6301
+merged_k_monotonic_PA_with_k,Merged-k PA non-decreasing as k increases,true,"k=1:PA=1.025, k=2:PA=1.487, k=4:PA=2.204, k=8:PA=2.946, k=16:PA=3.899, k=64:PA=4.876"
+merged_k_monotonic_SA_with_k,Merged-k SA non-increasing as k increases,true,"k=1:SA=1.375, k=2:SA=1.188, k=4:SA=1.094, k=8:SA=1.047, k=16:SA=1.023, k=64:SA=1.006"
+merged_k_not_dominated_for_all_k,No merged-k point dominates oracle on both SA and PA,true,checked all merged-k rows
+acl_signature_not_identical_to_oracle,ACL-signature SA differs from oracle (replication vs signature table),true,"ΔSA=3.1926, ΔPA=0.0246"
+all_planned_equals_masked,All summary groups planned_equals_masked,true,9/9 groups
+all_validation_passed,All summary groups validation_passed,true,9/9 groups
