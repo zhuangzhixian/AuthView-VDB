@@ -1,0 +1,5 @@
+case_id,N_sel,N_acl,N_acl_max,root_acl_class,root_object_class_binding,acl_ratio,selected_class_count,binding_count,object_level_policy_evals,acl_class_policy_evals,estimated_object_level_cost,estimated_acl_class_cost,witness_valid,topk_equivalent
+compliant_mixed,6,2,4,14819645764551743152,303706358023279221,0.3333,2,6,6,2,12,10,true,true
+post_filter_contrast,4,2,4,14819645764551743152,4494635903176801596,0.5000,2,4,4,2,8,8,true,true
+all_same_class,6,1,4,15086271425969589225,11387708722050549333,0.1667,1,6,6,1,12,8,true,true
+degenerate_one_per_object,6,6,8,3313412835606237231,1566804132787366668,1.0000,6,6,6,6,12,18,true,true
