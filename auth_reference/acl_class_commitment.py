@@ -477,8 +477,51 @@ def estimate_acl_class_zk_cost(
     )
 
 
-def build_acl_class_zk_witness_for_candidates(
-    candidates: list[CandidateRecord],
+def _candidate_grid_from_v3db_buffers(
+    buffers: V3DBSlotBuffers,
+    bindings: dict[int, ObjectClassBinding],
+    class_labels: dict[int, ACLClassLabel],
+) -> list[list[CandidateRecord]]:
+    """Probe-major candidate grid aligned with V3DB slot buffers (row i = probe i)."""
+    from auth_reference.records import AuthLabel
+
+    n_probe, capacity = buffers.valids.shape
+    default = AuthLabel(
+        tenant="acme",
+        project="proj-a",
+        level=0,
+        state="active",
+        epoch=0,
+    )
+    grid: list[list[CandidateRecord]] = []
+    for i in range(n_probe):
+        list_id = int(buffers.cluster_idxes[i])
+        row: list[CandidateRecord] = []
+        for j in range(capacity):
+            cid = int(buffers.itemss[i, j])
+            valid = bool(buffers.valids[i, j])
+            if valid and cid in bindings:
+                label = expand_auth_label_for_cid(bindings[cid], class_labels)
+            else:
+                label = default
+            row.append(
+                CandidateRecord(
+                    cid=cid,
+                    list_id=list_id,
+                    slot_id=j,
+                    valid=valid,
+                    distance=0,
+                    label=label,
+                )
+            )
+        grid.append(row)
+    return grid
+
+
+def _build_acl_class_zk_witness_from_grid(
+    grid: list[list[CandidateRecord | None]],
+    n_probe: int,
+    slot_per_list: int,
     bindings: dict[int, ObjectClassBinding],
     class_labels: dict[int, ACLClassLabel],
     user: UserContext,
@@ -488,14 +531,7 @@ def build_acl_class_zk_witness_for_candidates(
     acl_class_tree: ACLClassTree | None = None,
     binding_tree: ObjectClassBindingTree | None = None,
 ) -> ACLClassZkWitness:
-    """
-    Build fixed-shape ACL-class ZK witness from candidate grid.
-
-    Invalid slots bind to dummy class (acl_class_id=0) at index of first dummy
-    padding row in selected class table.
-    """
-    grid, n_probe, slot_per_list = _candidate_grid(candidates)
-
+    """Shared witness builder for probe-major or list-id-organized candidate grids."""
     used_class_ids: set[int] = set()
     for row in grid:
         for cell in row:
@@ -512,8 +548,6 @@ def build_acl_class_zk_witness_for_candidates(
     selected_labels, selected_valids, id_to_index = _build_selected_class_table(
         class_labels, used_class_ids, n_acl_max
     )
-
-    dummy_index = next(i for i, v in enumerate(selected_valids) if v == 0)
 
     flat_bindings = _bindings_row_major_from_grid(grid, bindings)
     if binding_tree is None:
@@ -549,15 +583,17 @@ def build_acl_class_zk_witness_for_candidates(
 
             if cell is not None and cell.valid:
                 class_idx = id_to_index[binding.acl_class_id]
+                row_selector.append(_one_hot(class_idx, n_acl_max))
+                row_vis.append(class_vis[class_idx])
             else:
-                class_idx = dummy_index
+                class_idx = 0
+                row_selector.append([0] * n_acl_max)
+                row_vis.append(0)
 
             row_bindings.append(binding)
             row_dirs.append(dirs)
             row_sibs.append(sibs)
             row_class_idx.append(class_idx)
-            row_selector.append(_one_hot(class_idx, n_acl_max))
-            row_vis.append(class_vis[class_idx] if cell is not None and cell.valid else 0)
             flat_idx += 1
 
         per_slot_bindings.append(row_bindings)
@@ -600,6 +636,37 @@ def build_acl_class_zk_witness_for_candidates(
     )
 
 
+def build_acl_class_zk_witness_for_candidates(
+    candidates: list[CandidateRecord],
+    bindings: dict[int, ObjectClassBinding],
+    class_labels: dict[int, ACLClassLabel],
+    user: UserContext,
+    checkpoint: Checkpoint,
+    *,
+    n_acl_max: int | None = None,
+    acl_class_tree: ACLClassTree | None = None,
+    binding_tree: ObjectClassBindingTree | None = None,
+) -> ACLClassZkWitness:
+    """
+    Build fixed-shape ACL-class ZK witness from candidate grid.
+
+    Invalid slots use all-zero class selectors (no dummy row required).
+    """
+    grid, n_probe, slot_per_list = _candidate_grid(candidates)
+    return _build_acl_class_zk_witness_from_grid(
+        grid,
+        n_probe,
+        slot_per_list,
+        bindings,
+        class_labels,
+        user,
+        checkpoint,
+        n_acl_max=n_acl_max,
+        acl_class_tree=acl_class_tree,
+        binding_tree=binding_tree,
+    )
+
+
 def build_acl_class_zk_witness_for_buffers(
     buffers: V3DBSlotBuffers,
     bindings: dict[int, ObjectClassBinding],
@@ -609,39 +676,13 @@ def build_acl_class_zk_witness_for_buffers(
     *,
     n_acl_max: int | None = None,
 ) -> ACLClassZkWitness:
-    """Build witness from V3DB fixed-shape slot buffers."""
-    from auth_reference.records import AuthLabel
-
-    n_probe, capacity = buffers.valids.shape
-    candidates: list[CandidateRecord] = []
-    for i in range(n_probe):
-        list_id = int(buffers.cluster_idxes[i])
-        for j in range(capacity):
-            cid = int(buffers.itemss[i, j])
-            valid = bool(buffers.valids[i, j])
-            if valid and cid in bindings:
-                label = expand_auth_label_for_cid(bindings[cid], class_labels)
-            else:
-                label = AuthLabel(
-                    tenant="acme",
-                    project="proj-a",
-                    level=0,
-                    state="active",
-                    epoch=0,
-                )
-            candidates.append(
-                CandidateRecord(
-                    cid=cid,
-                    list_id=list_id,
-                    slot_id=j,
-                    valid=valid,
-                    distance=0,
-                    label=label,
-                )
-            )
-
-    return build_acl_class_zk_witness_for_candidates(
-        candidates,
+    """Build witness from V3DB fixed-shape slot buffers (probe-major row order)."""
+    grid = _candidate_grid_from_v3db_buffers(buffers, bindings, class_labels)
+    n_probe, slot_per_list = buffers.valids.shape
+    return _build_acl_class_zk_witness_from_grid(
+        grid,
+        n_probe,
+        slot_per_list,
         bindings,
         class_labels,
         user,
@@ -661,6 +702,7 @@ def verify_acl_class_witness_plaintext(
     *,
     n_probe: int | None = None,
     slots_per_list: int | None = None,
+    buffers: V3DBSlotBuffers | None = None,
 ) -> dict[str, object]:
     """
     Plaintext validation of ACL-class ZK witness layout.
@@ -669,6 +711,9 @@ def verify_acl_class_witness_plaintext(
     visibility inheritance, and top-k equivalence with object-level reference.
     """
     grid, grid_n_probe, grid_slots = _candidate_grid(candidates)
+    if buffers is not None:
+        grid = _candidate_grid_from_v3db_buffers(buffers, bindings, class_labels)
+        grid_n_probe, grid_slots = buffers.valids.shape
     if n_probe is not None and n_probe != grid_n_probe:
         raise ValueError("n_probe mismatch")
     if slots_per_list is not None and slots_per_list != grid_slots:
@@ -709,6 +754,7 @@ def verify_acl_class_witness_plaintext(
             binding = witness.per_slot_bindings[i][j]
             class_idx = witness.per_slot_class_index[i][j]
             selected = witness.selected_class_labels[class_idx]
+            selector = witness.per_slot_class_selector[i][j]
 
             if cell is not None and cell.valid:
                 if binding.cid != cell.cid:
@@ -723,33 +769,26 @@ def verify_acl_class_witness_plaintext(
                         f"class index mismatch at ({i},{j}): "
                         f"binding class {binding.acl_class_id} != selected {selected.acl_class_id}"
                     )
-            else:
-                if binding.acl_class_id != selected.acl_class_id:
-                    raise ValueError(
-                        f"invalid slot class mismatch at ({i},{j})"
-                    )
-
-            # One-hot selector
-            selector = witness.per_slot_class_selector[i][j]
-            if sum(selector) != 1:
-                raise ValueError(f"selector not one-hot at ({i},{j})")
-            if selector[class_idx] != 1:
-                raise ValueError(f"selector/index mismatch at ({i},{j})")
+                if sum(selector) != 1:
+                    raise ValueError(f"selector not one-hot at ({i},{j})")
+                if selector[class_idx] != 1:
+                    raise ValueError(f"selector/index mismatch at ({i},{j})")
+            elif sum(selector) != 0:
+                raise ValueError(f"invalid slot selector must be zero at ({i},{j})")
 
             # 5–6. Visibility inheritance
-            expected_vis = witness.class_visibility_plaintext[class_idx]
             if cell is not None and cell.valid:
+                expected_vis = witness.class_visibility_plaintext[class_idx]
                 policy_vis = evaluate_acl_class_visibility(user, selected, checkpoint)
                 if witness.class_visibility_plaintext[class_idx] != policy_vis:
                     raise ValueError(
                         f"class visibility mismatch at index {class_idx}"
                     )
-            slot_vis = witness.expected_slot_visibility[i][j]
-            if cell is not None and cell.valid:
+                slot_vis = witness.expected_slot_visibility[i][j]
                 if slot_vis != expected_vis:
                     raise ValueError(f"slot visibility not inherited at ({i},{j})")
             else:
-                if slot_vis != 0:
+                if witness.expected_slot_visibility[i][j] != 0:
                     raise ValueError(f"invalid slot must have visibility 0 at ({i},{j})")
 
     # 7. Top-k equivalence
@@ -792,3 +831,97 @@ def verify_acl_class_witness_plaintext(
         "acl_top_k": cmp["acl_top_k"],
         "cost": cost,
     }
+
+
+def split_acl_class_zk_witness_for_zk(witness: ACLClassZkWitness) -> dict[str, object]:
+    """Split ACLClassZkWitness into arrays for py_set_based_auth_acl_class_with_merkle."""
+    return {
+        "root_acl_class": int(witness.root_acl_class),
+        "root_object_class_binding": int(witness.root_object_class_binding),
+        "n_acl_max": int(witness.n_acl_max),
+        "selected_class_valids": [int(v) for v in witness.selected_class_valids],
+        "selected_acl_class_ids": [
+            int(lbl.acl_class_id) for lbl in witness.selected_class_labels
+        ],
+        "selected_class_tenant_ids": [
+            int(lbl.tenant_id) for lbl in witness.selected_class_labels
+        ],
+        "selected_class_project_ids": [
+            int(lbl.project_id) for lbl in witness.selected_class_labels
+        ],
+        "selected_class_required_clearances": [
+            int(lbl.required_clearance) for lbl in witness.selected_class_labels
+        ],
+        "selected_class_states": [
+            int(ZK_STATE_ID.get(lbl.state, 0)) for lbl in witness.selected_class_labels
+        ],
+        "selected_class_epochs": [int(lbl.epoch) for lbl in witness.selected_class_labels],
+        "selected_class_path_directions": witness.selected_class_path_directions,
+        "selected_class_path_siblings": witness.selected_class_path_siblings,
+        "binding_acl_class_ids": [
+            [int(b.acl_class_id) for b in row] for row in witness.per_slot_bindings
+        ],
+        "binding_epochs": [
+            [int(b.epoch) for b in row] for row in witness.per_slot_bindings
+        ],
+        "binding_path_directions": witness.per_slot_binding_path_directions,
+        "binding_path_siblings": witness.per_slot_binding_path_siblings,
+        "per_slot_class_selector": witness.per_slot_class_selector,
+    }
+
+
+def top_k_cids_from_acl_class_ordered(
+    candidates: list[CandidateRecord],
+    bindings: dict[int, ObjectClassBinding],
+    class_labels: dict[int, ACLClassLabel],
+    user: UserContext,
+    checkpoint: Checkpoint,
+    top_k: int,
+    *,
+    n_probe: int,
+    slots_per_list: int,
+) -> list[int]:
+    """Return ACL-class compressed authorized top-k cids (oracle tie-break)."""
+    from auth_reference.acl_class import authorized_topk_acl_compressed
+
+    result = authorized_topk_acl_compressed(
+        candidates,
+        bindings,
+        class_labels,
+        user,
+        checkpoint,
+        top_k,
+        n_probe=n_probe,
+        slots_per_list=slots_per_list,
+    )
+    return list(result.top_k_cids)
+
+
+def build_acl_class_zk_witness_for_v3db_query(
+    query,
+    center,
+    code_books,
+    quant_vecs,
+    id_groups,
+    n_probe: int,
+    bindings: dict[int, ObjectClassBinding],
+    class_labels: dict[int, ACLClassLabel],
+    user: UserContext,
+    checkpoint: Checkpoint,
+    *,
+    n_acl_max: int | None = None,
+) -> ACLClassZkWitness:
+    """Build ACL-class ZK witness from V3DB query buffers + ACL bindings."""
+    from auth_reference.v3db_adapter import build_candidates_from_v3db_query
+
+    _candidates, _rows, buffers = build_candidates_from_v3db_query(
+        query, center, code_books, quant_vecs, id_groups, n_probe, labels={}
+    )
+    return build_acl_class_zk_witness_for_buffers(
+        buffers,
+        bindings,
+        class_labels,
+        user,
+        checkpoint,
+        n_acl_max=n_acl_max,
+    )
