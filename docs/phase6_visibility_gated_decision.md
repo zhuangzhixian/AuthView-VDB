@@ -208,3 +208,51 @@ Otherwise: stop at 6B-2 and publish ideal curve.
 | [phase6_visibility_gated_decision.md](phase6_visibility_gated_decision.md) | This memo — priority and publication framing |
 
 **No source code modified in Phase 6A.**
+
+---
+
+## 12. Updated Decision After Access-Aware Indexing Review (Phase 6A-2)
+
+**Date:** Phase 6A-2 design freeze  
+**Companion:** [phase6_access_aware_proof_planning.md](phase6_access_aware_proof_planning.md)
+
+After reviewing access-aware indexing (Veda / EffVeda) as **motivation only**, Phase 6 scope is refined:
+
+### What changed
+
+| Before (6A) | After (6A-2) |
+|-------------|--------------|
+| Primary implementation target: candidate-level gated oracle | Primary target: **plaintext proof planning reference** with pure/impure regions |
+| Compaction Option 3 as main long-term path | **Pure-invisible regions** + impure fallback as preferred structure; compaction deferred |
+| Cost axis: `N_vis/N_sel` only | Add **pure/impure ratios** and SA/PA discussion framework |
+| Single gating metaphor | **Proof plan** `Plan(q,U,σ)` covering all slots |
+
+### Conclusions (frozen)
+
+1. **Continue Phase 6B-1** — but implement **`proof_planning_reference` first**, not standalone candidate-level gated module alone. Candidate-level gating remains the **semantic floor** (impure region of size 1).
+
+2. **Do not directly implement full ZK candidate-level dynamic compaction** as the first engineering milestone. Static fixed-shape circuits will not benefit from per-slot `if visibility` without shape change.
+
+3. **Treat pure/impure proof planning as the preferred path** toward measurable proof-cost reduction:
+   - `pure_invisible` regions → skip ADC + batched policy
+   - `pure_visible` regions → batched policy + full distance
+   - `impure` regions → existing masked / ACL-class path
+
+4. **Veda/EffVeda are related work**, not dependencies. Do not claim Veda extension. Pure/impure here means **proof planning**, not trusted index execution.
+
+5. **Phase 6B-2** should produce two figure families: `N_vis/N_sel` (6A) and **pure/impure structural ratio** (6A-2).
+
+6. **Phase 6B-3** (optional ZK): start with **region purity gadget**, not full visible-subset compaction integrated into V3DB proof loop.
+
+### Revised priority stack
+
+```
+P0  Phase 6B-1  plaintext proof planning reference + PP-* / PI-* / COV-* tests
+P1  Phase 6B-2  cost model + N_vis/N_sel + pure/impure ratio sweeps (plaintext)
+P2  Phase 6B-3  region purity component ZK (conditional)
+P3  Full planned ZK path integrated with V3DB (only if P2 break-even)
+```
+
+### MPV paper claim (updated)
+
+> “We formulate access-structure-aware **proof planning** over committed authorization views—pure-visible, pure-invisible, and impure regions—showing equivalence to masked-distance authorized top-k. Inspired by access-aware indexing but under malicious security; ideal cost scales with visible distance work and region purity, not merely global visibility ratio.”
