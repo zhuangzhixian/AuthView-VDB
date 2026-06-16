@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Phase 2D/2E: AuthView ZK proof path overhead + scaling benchmark.
+Phase 2D/2E/3C: AuthView ZK proof path overhead + scaling benchmark.
 
-Compares four paths on synthetic IVF-PQ workloads:
-  baseline, auth_all_visible, auth_policy, auth_committed
+Compares five paths on synthetic IVF-PQ workloads:
+  baseline, auth_all_visible, auth_policy, auth_committed, auth_slot_aligned
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ import numpy as np
 
 from auth_reference.attacks import DEFAULT_CHECKPOINT
 from auth_reference.auth_commitment import next_pow2
+from auth_reference.slot_aligned_auth_commitment import tree_depth_padded
 from auth_reference.v3db_adapter import (
     V3DBSlotBuffers,
     build_committed_auth_witness,
     build_partial_visible_labels,
+    build_slot_aligned_zk_witness_for_buffers,
     build_synthetic_user_context,
     candidate_records_from_slot_buffers,
     compute_v3db_slot_distances,
@@ -36,6 +38,7 @@ from tests.test_auth_zk_all_visible import (
 from zk_IVF_PQ.zk_IVF_PQ import (
     py_set_based_auth_all_visible_with_merkle,
     py_set_based_auth_committed_with_merkle,
+    py_set_based_auth_slot_aligned_with_merkle,
     py_set_based_auth_with_merkle,
     py_set_based_with_merkle,
 )
@@ -65,6 +68,7 @@ PATH_NAMES = (
     "auth_all_visible",
     "auth_policy",
     "auth_committed",
+    "auth_slot_aligned",
 )
 
 
@@ -76,6 +80,7 @@ def _parse_int_list(value: str) -> list[int]:
 
 
 def auth_tree_depth(n_probe: int, slot_per_list: int) -> int:
+    """Global committed tree depth: tree_depth(next_pow2(N_sel))."""
     padded = next_pow2(n_probe * slot_per_list)
     depth = 0
     n = padded
@@ -83,6 +88,11 @@ def auth_tree_depth(n_probe: int, slot_per_list: int) -> int:
         n //= 2
         depth += 1
     return depth
+
+
+def slot_aligned_auth_tree_depth(n_list: int, slot_per_list: int) -> int:
+    """Slot-aligned auth depth recorded in CSV: depth_top + depth_slot."""
+    return tree_depth_padded(n_list) + tree_depth_padded(slot_per_list)
 
 
 def _visible_ratio(candidates, user, checkpoint) -> float:
@@ -227,6 +237,9 @@ def build_synthetic_workload(
     user_w = encode_user_context_for_zk(user, checkpoint)
     slot_w = encode_slot_auth_labels_for_zk(buffers, labels)
     committed_w = build_committed_auth_witness(buffers, labels)
+    slot_aligned_w = build_slot_aligned_zk_witness_for_buffers(
+        buffers, labels, n_list=n_list
+    )
 
     meta = {
         "num_vectors": num_vectors,
@@ -238,6 +251,9 @@ def build_synthetic_workload(
         "N_sel": n_probe * capacity,
         "visible_ratio": _visible_ratio(candidates, user, checkpoint),
         "auth_tree_depth": auth_tree_depth(n_probe, capacity),
+        "slot_aligned_auth_tree_depth": slot_aligned_auth_tree_depth(
+            n_list, capacity
+        ),
     }
 
     return {
@@ -246,6 +262,7 @@ def build_synthetic_workload(
         "user_w": user_w,
         "slot_w": slot_w,
         "committed_w": committed_w,
+        "slot_aligned_w": slot_aligned_w,
         "meta": meta,
     }
 
@@ -270,6 +287,7 @@ def run_path(path: str, workload) -> tuple[float, float, float, int, int, int]:
     user_w = workload["user_w"]
     slot_w = workload["slot_w"]
     committed_w = workload["committed_w"]
+    slot_aligned_w = workload["slot_aligned_w"]
 
     if path == "baseline":
         metrics = py_set_based_with_merkle(*base, [])
@@ -308,6 +326,28 @@ def run_path(path: str, workload) -> tuple[float, float, float, int, int, int]:
             committed_w["auth_path_directions"],
             committed_w["auth_path_siblings"],
         )
+    elif path == "auth_slot_aligned":
+        metrics = py_set_based_auth_slot_aligned_with_merkle(
+            *base,
+            int(slot_aligned_w["root_auth"]),
+            int(user_w["user_tenant_id"]),
+            list(user_w["user_project_ids"]),
+            list(user_w["user_project_valids"]),
+            int(user_w["user_clearance"]),
+            int(user_w["user_epoch"]),
+            int(user_w["checkpoint_epoch"]),
+            slot_aligned_w["object_tenant_ids"],
+            slot_aligned_w["object_project_ids"],
+            slot_aligned_w["object_levels"],
+            slot_aligned_w["object_states"],
+            slot_aligned_w["object_epochs"],
+            slot_aligned_w["list_ids"],
+            slot_aligned_w["list_auth_roots"],
+            slot_aligned_w["top_path_directions"],
+            slot_aligned_w["top_path_siblings"],
+            slot_aligned_w["intra_path_directions"],
+            slot_aligned_w["intra_path_siblings"],
+        )
     else:
         raise ValueError(f"unknown path: {path}")
 
@@ -316,6 +356,11 @@ def run_path(path: str, workload) -> tuple[float, float, float, int, int, int]:
 
 def _row(path: str, repeat_id: int, meta: dict, metrics: tuple) -> dict:
     build_time, prove_time, verify_time, proof_size, memory, gates = metrics
+    depth = (
+        meta["slot_aligned_auth_tree_depth"]
+        if path == "auth_slot_aligned"
+        else meta["auth_tree_depth"]
+    )
     return {
         "path": path,
         "repeat_id": repeat_id,
@@ -327,7 +372,7 @@ def _row(path: str, repeat_id: int, meta: dict, metrics: tuple) -> dict:
         "top_k": meta["top_k"],
         "N_sel": meta["N_sel"],
         "visible_ratio": f"{meta['visible_ratio']:.6f}",
-        "auth_tree_depth": meta["auth_tree_depth"],
+        "auth_tree_depth": depth,
         "build_time": build_time,
         "prove_time": prove_time,
         "verify_time": verify_time,
@@ -351,7 +396,8 @@ def print_summary(rows: list[dict]) -> None:
     print("\n--- scaling summary (repeat_id=0) ---")
     print(
         f"{'n_probe':>7} {'slot':>5} {'N_sel':>6} {'depth':>5} "
-        f"{'baseline':>9} {'policy':>9} {'committed':>9} {'c/b gates':>10}"
+        f"{'baseline':>9} {'policy':>9} {'committed':>9} {'slot_algn':>9} "
+        f"{'c/b':>6} {'s/c':>6} {'s/p_t':>6}"
     )
     for key in sorted(workloads):
         n_probe, slot, top_k = key
@@ -359,6 +405,7 @@ def print_summary(rows: list[dict]) -> None:
         baseline = paths.get("baseline")
         policy = paths.get("auth_policy")
         committed = paths.get("auth_committed")
+        slot_aligned = paths.get("auth_slot_aligned")
         if not baseline or not committed:
             continue
         n_sel = int(baseline["N_sel"])
@@ -366,11 +413,23 @@ def print_summary(rows: list[dict]) -> None:
         b_gates = int(baseline["gates"])
         p_gates = int(policy["gates"]) if policy else 0
         c_gates = int(committed["gates"])
-        ratio = c_gates / b_gates if b_gates else 0.0
+        s_gates = int(slot_aligned["gates"]) if slot_aligned else 0
+        c_ratio = c_gates / b_gates if b_gates else 0.0
+        s_c_ratio = s_gates / c_gates if c_gates else 0.0
+        if slot_aligned and committed:
+            s_p_ratio = (
+                float(slot_aligned["prove_time"]) / float(committed["prove_time"])
+                if float(committed["prove_time"])
+                else 0.0
+            )
+        else:
+            s_p_ratio = 0.0
         print(
             f"{n_probe:7d} {slot:5d} {n_sel:6d} {depth:5d} "
-            f"{b_gates:9d} {p_gates:9d} {c_gates:9d} {ratio:10.3f}"
+            f"{b_gates:9d} {p_gates:9d} {c_gates:9d} {s_gates:9d} "
+            f"{c_ratio:6.3f} {s_c_ratio:6.3f} {s_p_ratio:6.3f}"
         )
+    print("  c/b = committed/baseline gates; s/c = slot/global gates; s/p_t = slot/global prove_time")
     print("-------------------------------------\n")
 
 
