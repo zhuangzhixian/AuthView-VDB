@@ -1,3 +1,4 @@
+pub mod acl_class_commitment_gadget; // ACL-class commitment (Phase 5B-2)
 pub mod auth_commitment_gadget; // auth label Merkle commitment (Phase 2C-1)
 pub mod auth_mask_gadget; // authorization visibility mask (Phase 2B-1)
 pub mod auth_policy_gadget; // authorization policy predicate (Phase 2B-2)
