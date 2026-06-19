@@ -202,6 +202,7 @@ def test_fixed_block_size_changes_region_count():
         purity_modes=["clustered"],
         block_sizes=[8, 32],
         top_k=3,
+        workload_model="purity_sweep",
     )
     rows = run_benchmark(args)
     counts = {int(r["block_size"]): int(r["region_count"]) for r in rows}
@@ -218,8 +219,10 @@ def test_pa_values_positive(tmp_path):
 def test_degenerate_all_impure_near_masked_baseline():
     row = evaluate_case(
         case_id="degenerate_impure",
+        workload_model="purity_sweep",
         grouping_strategy="ivf_list",
         purity_mode="adversarial_mixed",
+        locality="",
         block_size=16,
         n_valid=8,
         n_lists=2,
@@ -253,10 +256,14 @@ def test_artifact_csv_exists_after_full_run():
 def test_summarize_in_memory():
     rows = [
         {
+            "workload_model": "purity_sweep",
             "grouping_strategy": "ivf_list",
             "purity_mode": "clustered",
+            "locality": "",
             "visible_ratio": "0.500000",
             "block_size": "16",
+            "N_valid": "256",
+            "impure_valid_count": "64",
             "region_count": "4",
             "pure_region_ratio": "0.750000",
             "impure_region_ratio": "0.250000",

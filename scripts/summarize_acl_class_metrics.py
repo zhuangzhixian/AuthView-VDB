@@ -169,6 +169,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("artifacts/auth_zk_acl_class_summary.csv"),
     )
+    parser.add_argument(
+        "--summary-out",
+        type=Path,
+        default=None,
+        help="Alias for --output (Phase 7B repeat=3 naming).",
+    )
     return parser.parse_args(argv)
 
 
@@ -184,7 +190,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     summary = summarize(raw)
-    write_summary(summary, args.output)
+    output = args.summary_out if args.summary_out is not None else args.output
+    write_summary(summary, output)
     n_groups = len(
         {
             (
@@ -198,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         f"Wrote {len(summary)} summary rows "
-        f"({n_groups} workload×N_acl groups × paths) to {args.output}"
+        f"({n_groups} workload×N_acl groups × paths) to {output}"
     )
     return 0
 

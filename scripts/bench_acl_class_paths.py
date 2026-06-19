@@ -454,6 +454,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output",
         type=Path,
         default=Path("artifacts/auth_zk_acl_class_metrics.csv"),
+        help="Raw metrics CSV output path.",
+    )
+    parser.add_argument(
+        "--metrics-out",
+        type=Path,
+        default=None,
+        help="Alias for --output (Phase 7B repeat=3 naming).",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-vectors", type=int, default=400)
@@ -489,9 +496,11 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --repeat must be >= 1", file=sys.stderr)
         return 1
 
+    output = args.metrics_out if args.metrics_out is not None else args.output
+
     rows = run_benchmark(
         repeat=args.repeat,
-        output=args.output,
+        output=output,
         num_vectors=args.num_vectors,
         dim=args.dim,
         n_list=args.n_list,
@@ -505,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     n_workloads = len(args.n_probe_list) * len(args.slot_per_list_list) * len(args.top_k_list)
     print(
         f"Wrote {len(rows)} rows (~{n_workloads} workloads × "
-        f"len(N_acl) × {len(PATH_NAMES)} paths × {args.repeat} repeats) to {args.output}"
+        f"len(N_acl) × {len(PATH_NAMES)} paths × {args.repeat} repeats) to {output}"
     )
     return 0
 

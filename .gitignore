@@ -1,6 +1,9 @@
 # QZP
 /data/
 /tmp/
+artifacts/public_utility/traces/
+artifacts/logs/
+artifacts/checkpoints/
 # /src/_ivfpq/
 # /src/**/_*
 
@@ -76,3 +79,6 @@ docs/_build/
 
 # Pyenv
 .python-version
+
+# Local diagnostics
+artifacts/diagnostics/

@@ -1,0 +1,2 @@
+dataset,config,data_name,scheme,M,K,top_k,n_list,n_probe,cluster_bound,scale_n,layout,num_base,num_queries,dim,full_base,recall_at_1,recall_at_10,recall_at_100,build_time_s,query_time_s,qps,index_size_bytes,trace_path,run_index
+gist1m,high-acc,gist,standard,8,256,100,8192,64,256,65536,none,1000000,1000,960,true,0.084,0.241,0.552,247.90611004829407,13.894250631332397,71.97221545327086,104505856,/home/zhixian/AuthView-VDB/artifacts/public_utility/traces/gist1m_high-acc_results.npz,0

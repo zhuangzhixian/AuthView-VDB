@@ -1,0 +1,10 @@
+workload_model,physical_layout,num_objects,num_roles,num_signatures,merged_k,cases,median_effective_selectivity,median_SA_commit,median_PA_plan,median_plan_vs_masked_cost,q25_plan_vs_masked_cost,q75_plan_vs_masked_cost,median_impure_valid_ratio,median_impure_region_ratio,median_dist_reduction_plan,median_stored_entries_norm,all_planned_equals_masked,all_validation_passed
+access_signature_layout,acl_signature,4096,16,64,0,80,0.207398,1.437500,1.024601,0.210140,0.164282,0.346370,0.000000,0.000000,0.792602,1.062500,true,true
+access_signature_layout,global,4096,16,64,0,80,0.207398,1.020000,4.875963,1.000033,1.000033,1.000033,1.000000,1.000000,0.000000,1.000000,true,true
+access_signature_layout,merged_k,4096,16,64,1,80,0.207398,1.375000,1.024601,0.210140,0.164282,0.346370,0.000000,0.000000,0.792602,1.000000,true,true
+access_signature_layout,merged_k,4096,16,64,16,80,0.207398,1.023438,3.899423,1.000130,0.885734,1.000130,1.000000,1.000000,0.000000,1.000000,true,true
+access_signature_layout,merged_k,4096,16,64,2,80,0.207398,1.187500,1.486941,0.338916,0.257959,0.590006,0.211304,0.343750,0.676880,1.000000,true,true
+access_signature_layout,merged_k,4096,16,64,4,80,0.207398,1.093750,2.203963,0.538151,0.388114,0.853927,0.457398,0.625000,0.495606,1.000000,true,true
+access_signature_layout,merged_k,4096,16,64,64,80,0.207398,1.005859,4.875963,1.000033,1.000033,1.000033,1.000000,1.000000,0.000000,1.000000,true,true
+access_signature_layout,merged_k,4096,16,64,8,80,0.207398,1.046875,2.945890,0.900505,0.531425,1.000260,0.893066,0.875000,0.106689,1.000000,true,true
+access_signature_layout,oracle_authorized_view,4096,16,64,0,80,0.207398,4.630127,1.000000,0.205095,0.159237,0.341325,0.000000,0.000000,0.792602,4.598877,true,true
