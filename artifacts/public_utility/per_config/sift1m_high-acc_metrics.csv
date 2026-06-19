@@ -1,0 +1,2 @@
+dataset,config,data_name,scheme,M,K,top_k,n_list,n_probe,cluster_bound,scale_n,layout,num_base,num_queries,dim,full_base,recall_at_1,recall_at_10,recall_at_100,build_time_s,query_time_s,qps,index_size_bytes,trace_path,run_index
+sift1m,high-acc,sift,standard,8,256,100,8192,64,256,65536,none,1000000,10000,128,true,0.3217,0.7487,0.9581,98.89831924438477,37.19537305831909,268.85064398523105,76390912,/home/zhixian/AuthView-VDB/artifacts/public_utility/traces/sift1m_high-acc_results.npz,0

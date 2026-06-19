@@ -1,0 +1,2 @@
+dataset,config,data_name,scheme,M,K,top_k,n_list,n_probe,cluster_bound,scale_n,layout,num_base,num_queries,dim,full_base,recall_at_1,recall_at_10,recall_at_100,build_time_s,query_time_s,qps,index_size_bytes,trace_path,run_index
+gist1m,zk-opt,gist,standard,8,256,100,512,4,4096,65536,none,1000000,1000,960,true,0.08,0.211,0.438,18.86848545074463,9.015682935714722,110.91783142002483,74953216,/home/zhixian/AuthView-VDB/artifacts/public_utility/traces/gist1m_zk-opt_results.npz,0
