@@ -2,6 +2,7 @@
 /data/
 /tmp/
 artifacts/public_utility/traces/
+artifacts/auth_overlay/*_visibility.npz
 artifacts/logs/
 artifacts/checkpoints/
 # /src/_ivfpq/
@@ -82,3 +83,7 @@ docs/_build/
 
 # Local diagnostics
 artifacts/diagnostics/
+
+# Phase 9A local/generated visibility artifacts
+artifacts/auth_overlay/*_visibility.npz
+artifacts/auth_overlay/*_object_visibility.csv
