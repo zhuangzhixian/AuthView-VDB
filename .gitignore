@@ -87,3 +87,9 @@ artifacts/diagnostics/
 # Phase 9A local/generated visibility artifacts
 artifacts/auth_overlay/*_visibility.npz
 artifacts/auth_overlay/*_object_visibility.csv
+
+# Phase 9A local visibility samples
+artifacts/auth_overlay/*_object_visibility_sample.csv
+
+# Phase 9B calibration checkpoints (large per-query)
+artifacts/auth_calibration/full_authorized_reference_checkpoint.csv
