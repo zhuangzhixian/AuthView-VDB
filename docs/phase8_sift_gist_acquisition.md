@@ -12,7 +12,8 @@
 |------|------------|----------|
 | Standardize `data/public/sift1m/` and `data/public/gist1m/` | Yes | — |
 | V3DB-compatible symlinks `data/sift`, `data/gist` | Yes | — |
-| Download helper with resume + manual fallback | Yes | — |
+| Download helper with FTP primary + HTTP fallback | Yes | — |
+| Auto-normalize nested TEXMEX extract layout | Yes | — |
 | Loader sanity (fvecs/ivecs dim, sample read) | Yes | — |
 | MS MARCO DuckDB + embeddings | No | Phase 8D |
 | IVF-PQ index build | No | Phase 8C |
@@ -35,6 +36,13 @@ Phase 8B makes SIFT1M/GIST1M **locally available and loader-verified** before St
 
 **Source:** [TEXMEX / IRISA ANN benchmarks](http://corpus-texmex.irisa.fr/)
 
+| Dataset | Primary tarball (FTP) | Fallback tarball (HTTP) |
+|---------|---------------------|-------------------------|
+| SIFT1M | `ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz` | `http://corpus-texmex.irisa.fr/sift/sift.tar.gz` |
+| GIST1M | `ftp://ftp.irisa.fr/local/texmex/corpus/gist.tar.gz` | `http://corpus-texmex.irisa.fr/gist/gist.tar.gz` |
+
+**Network note (this server):** FTP primary URLs are **verified working**. HTTP tarball URLs **timeout** on this host and are kept only as fallback / manual reference. Per-file HTTP URLs remain documented for manual recovery.
+
 | Dataset | Base | Queries | Ground truth | Optional |
 |---------|------|---------|--------------|----------|
 | SIFT1M | 1M × 128D float32 | 10k | top-100 ivecs | learn (100k) |
@@ -42,43 +50,45 @@ Phase 8B makes SIFT1M/GIST1M **locally available and loader-verified** before St
 
 **Format:** `.fvecs` / `.ivecs` — each vector stored as `(dim: int32)(payload: dim × float32 or int32)`.
 
-**V3DB loader:** `vec_data_load/sift.py` expects folder name = prefix (`sift` or `gist`) with `{prefix}_base.fvecs`, etc.
+**V3DB loader:** `vec_data_load/sift.py` expects folder name = prefix (`sift` or `gist`) with `{prefix}_base.fvecs`, etc. at the **dataset root** (via symlink is OK).
 
 ---
 
-## 4. Directory structure
+## 4. Verified directory structure (this server)
+
+After IRISA FTP download + `prepare_texmex_datasets.py --check-only --link-v3db`:
 
 ```
 data/
 ├── public/
 │   ├── sift1m/
-│   │   ├── sift_base.fvecs
-│   │   ├── sift_query.fvecs
-│   │   ├── sift_groundtruth.ivecs
-│   │   └── sift_learn.fvecs          # optional
+│   │   ├── sift_base.fvecs          -> ./sift/sift_base.fvecs      (root canonical symlink)
+│   │   ├── sift_query.fvecs         -> ./sift/sift_query.fvecs
+│   │   ├── sift_groundtruth.ivecs   -> ./sift/sift_groundtruth.ivecs
+│   │   ├── sift_learn.fvecs         -> ./sift/sift_learn.fvecs     (optional)
+│   │   └── sift/                    (nested raw extract from tarball)
+│   │       ├── sift_base.fvecs
+│   │       ├── sift_query.fvecs
+│   │       ├── sift_groundtruth.ivecs
+│   │       └── sift_learn.fvecs
 │   └── gist1m/
-│       ├── gist_base.fvecs
-│       ├── gist_query.fvecs
-│       ├── gist_groundtruth.ivecs
-│       └── gist_learn.fvecs          # optional
-├── sift  -> public/sift1m            # V3DB compat (relative symlink)
+│       ├── gist_base.fvecs          -> ./gist/gist_base.fvecs
+│       ├── gist_query.fvecs         -> ./gist/gist_query.fvecs
+│       ├── gist_groundtruth.ivecs   -> ./gist/gist_groundtruth.ivecs
+│       ├── gist_learn.fvecs         -> ./gist/gist_learn.fvecs     (optional)
+│       └── gist/
+│           └── ...
+├── sift  -> public/sift1m            (V3DB compat, relative symlink)
 └── gist  -> public/gist1m
 ```
 
-The entire `data/` tree is gitignored (`/data/` in `.gitignore`). Do **not** commit fvecs archives or extracted files.
+The script searches up to **max-depth 4** under each dataset directory and creates root-level relative symlinks when files live in nested folders (typical TEXMEX tar extract layout).
 
 ---
 
 ## 5. V3DB-compatible symlink scheme
 
-From repository root, after files are **ready**:
-
-```bash
-ln -s public/sift1m data/sift
-ln -s public/gist1m data/gist
-```
-
-Or use the preparation script:
+When datasets are **ready**, with `--link-v3db`:
 
 ```bash
 PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
@@ -88,7 +98,22 @@ PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
   --link-v3db
 ```
 
-Symlinks are created only when all required fvecs/ivecs files exist. Existing non-symlink paths are not overwritten.
+Creates (relative symlinks from `data/`):
+
+- `data/sift` → `public/sift1m`
+- `data/gist` → `public/gist1m`
+
+Behavior:
+
+- Wrong existing symlinks are **safely updated**
+- Existing **directories** at `data/sift` or `data/gist` are **not deleted** (warning only)
+
+Manual equivalent:
+
+```bash
+ln -sfn public/sift1m data/sift
+ln -sfn public/gist1m data/gist
+```
 
 ---
 
@@ -102,13 +127,16 @@ PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
   --data-root data/public
 ```
 
-### 6.2 Check existing files (no download)
+Terminal output shows **primary FTP** and **fallback HTTP** URLs.
+
+### 6.2 Check + normalize + V3DB symlinks (no download)
 
 ```bash
 PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
   --dataset all \
   --data-root data/public \
-  --check-only
+  --check-only \
+  --link-v3db
 ```
 
 Report: `artifacts/texmex_prepare_report.md`
@@ -123,45 +151,40 @@ PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
   --link-v3db
 ```
 
-Downloads use resume-friendly HTTP Range requests. On network failure, the script prints manual `wget` commands and leaves partial files intact.
+Tries **FTP primary** first, then **HTTP fallback**. On failure prints explicit errors and manual `wget` commands (does not corrupt partial extracts).
 
-### 6.4 Manual download (recommended if server network is slow)
+### 6.4 Manual download (recommended on this server)
 
-**SIFT1M:**
+**SIFT1M (FTP):**
 
 ```bash
 mkdir -p data/public/sift1m
-wget -c http://corpus-texmex.irisa.fr/sift/sift.tar.gz -O data/public/sift1m/sift.tar.gz
+wget -c ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz -O data/public/sift1m/sift.tar.gz
 tar -xzf data/public/sift1m/sift.tar.gz -C data/public/sift1m
+PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
+  --dataset sift1m --data-root data/public --check-only --link-v3db
 ```
 
-Or per-file:
-
-```bash
-cd data/public/sift1m
-wget -c http://corpus-texmex.irisa.fr/sift/sift_base.fvecs
-wget -c http://corpus-texmex.irisa.fr/sift/sift_query.fvecs
-wget -c http://corpus-texmex.irisa.fr/sift/sift_groundtruth.ivecs
-wget -c http://corpus-texmex.irisa.fr/sift/sift_learn.fvecs   # optional
-```
-
-**GIST1M:**
+**GIST1M (FTP):**
 
 ```bash
 mkdir -p data/public/gist1m
-wget -c http://corpus-texmex.irisa.fr/gist/gist.tar.gz -O data/public/gist1m/gist.tar.gz
+wget -c ftp://ftp.irisa.fr/local/texmex/corpus/gist.tar.gz -O data/public/gist1m/gist.tar.gz
 tar -xzf data/public/gist1m/gist.tar.gz -C data/public/gist1m
+PYTHONPATH=. python scripts/prepare_texmex_datasets.py \
+  --dataset gist1m --data-root data/public --check-only --link-v3db
 ```
 
-Per-file URLs mirror the SIFT pattern under `http://corpus-texmex.irisa.fr/gist/`.
+HTTP fallback (may timeout on this server):
 
-After manual placement, re-run `--check-only` (and `--link-v3db` if ready).
+```bash
+wget -c http://corpus-texmex.irisa.fr/sift/sift.tar.gz -O data/public/sift1m/sift.tar.gz
+wget -c http://corpus-texmex.irisa.fr/gist/gist.tar.gz -O data/public/gist1m/gist.tar.gz
+```
 
 ---
 
 ## 7. Loader sanity check
-
-After files are present:
 
 ```bash
 PYTHONPATH=. python scripts/check_fvecs_dataset.py \
@@ -175,10 +198,10 @@ PYTHONPATH=. python scripts/check_fvecs_dataset.py \
 
 Checks (without loading full 1M vectors):
 
-- Required files exist
+- Required files exist at dataset root (symlinks OK)
 - Base/query dimension = 128 (SIFT) or 960 (GIST)
 - Base and query dims match
-- Ground-truth ivecs readable; sample neighbor count reported
+- Ground-truth ivecs readable
 
 Report: `artifacts/fvecs_dataset_check.md`
 
@@ -192,7 +215,23 @@ print(s.base_vecs.shape, s.query_vecs.shape, s.gt_vecs.shape)
 
 ---
 
-## 8. Phase 8C — utility pipeline (next)
+## 8. Git hygiene — do not commit
+
+| Path | Reason |
+|------|--------|
+| `data/public/` | Large fvecs / tarballs |
+| `data/sift`, `data/gist` | Symlinks to local data |
+| `artifacts/texmex_prepare_report.md` | Machine-local inventory |
+| `artifacts/fvecs_dataset_check.md` | Machine-local check output |
+| `artifacts/public_benchmark_inventory.md` | Phase 8A local scan |
+
+`data/` is gitignored via `/data/` in `.gitignore`. Optionally add machine-local artifacts to `.git/info/exclude`.
+
+Safe to commit: scripts, tests, and this documentation only.
+
+---
+
+## 9. Phase 8C — utility pipeline (next)
 
 Once both datasets report **ready** + checker **ok**:
 
@@ -201,47 +240,33 @@ Once both datasets report **ready** + checker **ok**:
    ```bash
    bash scripts/acc_bench.sh
    ```
-3. Begin AuthView D1-B/C: authorized reference vs unrestricted on same IVF-PQ index (see [public_dataset_evaluation_plan.md](public_dataset_evaluation_plan.md))
+3. Begin AuthView D1-B/C: authorized reference vs unrestricted on same IVF-PQ index
 4. Sample ZK proofs (D1-E) — not full-query enumeration
-
-Index parameters (from V3DB):
-
-| Profile | SIFT1M | GIST1M |
-|---------|--------|--------|
-| high-acc | n_list=8192, n_probe=64 | same |
-| zk-opt | n_list=1024, n_probe=8, cluster_bound=2048 | n_list=512, n_probe=4, cluster_bound=4096 |
-
-Common: `M=8`, `K=256`, `top_k=100`.
 
 ---
 
-## 9. MS MARCO status (pending — Phase 8D)
+## 10. MS MARCO status (pending — Phase 8D)
 
 | Item | Status |
 |------|--------|
 | Dataset | **pending** |
 | Required files | `collection.duckdb`, `queries.dev.duckdb`, `qrels.dev.tsv` under `data/msmacro/` |
 | Blocker | DuckDB embedding preparation (~50–100 GB) |
-| Next phase | **Phase 8D** — MS MARCO acquisition + `bench.ms_macro_eval` alignment |
-
-Do not block SIFT/GIST D1 work on MS MARCO completion.
+| Next phase | **Phase 8D** |
 
 ---
 
-## 10. Phase 8B deliverables
+## 11. Phase 8B deliverables
 
 | File | Purpose |
 |------|---------|
-| `scripts/prepare_texmex_datasets.py` | Download prep, normalize, V3DB symlinks |
+| `scripts/prepare_texmex_datasets.py` | FTP download, normalize, V3DB symlinks |
 | `scripts/check_fvecs_dataset.py` | Read-only fvecs/ivecs sanity |
 | `docs/phase8_sift_gist_acquisition.md` | This document |
-| `artifacts/texmex_prepare_report.md` | Generated prepare report |
-| `artifacts/fvecs_dataset_check.md` | Generated loader check (after data present) |
 | `tests/test_texmex_dataset_preparation.py` | Mock prepare tests |
-| `tests/test_fvecs_dataset_checker.py` | Mock checker tests |
 
 **Tests:**
 
 ```bash
-PYTHONPATH=. pytest tests/test_texmex_dataset_preparation.py tests/test_fvecs_dataset_checker.py -v
+PYTHONPATH=. pytest tests/test_texmex_dataset_preparation.py -v
 ```
