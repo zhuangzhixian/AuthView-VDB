@@ -1,0 +1,5 @@
+dataset,policy_mode,selectivity_target,selectivity_observed,seed,num_base,num_acl_classes,visible_count,mask_path,sample_csv_path
+gist1m,skewed_acl,0.1,0.1,511201845,1000000,20,100000,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p1_visibility.npz,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p1_object_visibility_sample.csv
+gist1m,skewed_acl,0.25,0.25,1598932394,1000000,16,250000,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p25_visibility.npz,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p25_object_visibility_sample.csv
+gist1m,skewed_acl,0.5,0.5,1407589997,1000000,16,500000,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p5_visibility.npz,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p5_object_visibility_sample.csv
+gist1m,skewed_acl,0.75,0.75,1060311817,1000000,16,750000,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p75_visibility.npz,/home/zhixian/AuthView-VDB/artifacts/auth_overlay/gist1m_skewed_acl_sel0p75_object_visibility_sample.csv
